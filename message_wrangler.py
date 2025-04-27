@@ -8,24 +8,32 @@ describe messages that will be passed over WebSocket between an Electron app and
 Unreal Engine.
 
 Usage:
-    python message_wrangler.py --input <input_file> --output <output_dir> [--cpp] [--ts] [--help]
+    python message_wrangler.py --input <input_file> --output <output_dir> [--cpp] [--ts] [--language <lang>] [--help]
 
 Arguments:
     --input, -i     : Path to the input file containing message definitions
     --output, -o    : Directory where output files will be generated
     --cpp           : Generate C++ output (default: True)
     --ts            : Generate TypeScript output (default: True)
+    --language, -l  : Output language format (cpp, typescript, or all)
+                      Overrides individual --cpp and --ts flags when specified
     --help, -h      : Show this help message
 
 Example:
     python message_wrangler.py --input messages.def --output ./generated --cpp --ts
+    python message_wrangler.py --input messages.def --output ./generated --language all
+    python message_wrangler.py --input messages.def --output ./generated --language cpp
 """
 
 import argparse
 import os
 import sys
-import json
 from typing import Dict, List, Any, Optional
+
+from message_model import MessageModel
+from message_parser import MessageParser
+from cpp_generator import CppGenerator
+from typescript_generator import TypeScriptGenerator
 
 
 class MessageFormatConverter:
@@ -44,7 +52,7 @@ class MessageFormatConverter:
         """
         self.input_file = input_file
         self.output_dir = output_dir
-        self.messages = {}
+        self.model = None
 
     def parse_input_file(self) -> bool:
         """
@@ -53,122 +61,9 @@ class MessageFormatConverter:
         Returns:
             bool: True if parsing was successful, False otherwise
         """
-        try:
-            print(f"Parsing input file: {self.input_file}")
-
-            # Check if the file exists
-            if not os.path.exists(self.input_file):
-                print(f"Error: Input file '{self.input_file}' does not exist.")
-                return False
-
-            # Reset messages dictionary
-            self.messages = {}
-
-            # Read the file content
-            with open(self.input_file, 'r') as f:
-                content = f.read()
-
-            # Parse the content
-            current_message = None
-            current_message_name = None
-            parent_message = None
-
-            # Split content into lines and process each line
-            lines = content.splitlines()
-            i = 0
-            while i < len(lines):
-                line = lines[i].strip()
-
-                # Skip empty lines
-                if not line:
-                    i += 1
-                    continue
-
-                # Parse message definition
-                if line.startswith('message '):
-                    # Extract message name and parent if exists
-                    message_def = line[len('message '):].strip()
-                    if '{' in message_def:
-                        message_def = message_def[:message_def.find('{')].strip()
-
-                    # Check for inheritance
-                    if ':' in message_def:
-                        parts = message_def.split(':')
-                        current_message_name = parts[0].strip()
-                        parent_message = parts[1].strip()
-                    else:
-                        current_message_name = message_def
-                        parent_message = None
-
-                    # Create new message entry
-                    current_message = {
-                        "fields": [],
-                        "parent": parent_message,
-                        "description": f"{current_message_name} message"
-                    }
-                    self.messages[current_message_name] = current_message
-
-                # Parse field definition
-                elif line.startswith('field ') and current_message is not None:
-                    # Extract field name and type
-                    field_def = line[len('field '):].strip()
-                    if ':' in field_def:
-                        name, type_def = field_def.split(':', 1)
-                        name = name.strip()
-                        type_def = type_def.strip()
-
-                        # Handle enum type
-                        if type_def.startswith('enum'):
-                            enum_values = []
-                            if '{' in type_def and '}' in type_def:
-                                enum_str = type_def[type_def.find('{')+1:type_def.find('}')].strip()
-                                enum_values = [v.strip() for v in enum_str.split(',')]
-
-                            field = {
-                                "name": name,
-                                "type": "enum",
-                                "enum_values": enum_values,
-                                "description": f"{name} enum field"
-                            }
-                            current_message["fields"].append(field)
-
-                        # Handle compound type (like float { x, y, z })
-                        elif '{' in type_def and '}' in type_def:
-                            base_type = type_def[:type_def.find('{')].strip()
-                            components_str = type_def[type_def.find('{')+1:type_def.find('}')].strip()
-                            components = [c.strip() for c in components_str.split(',')]
-
-                            field = {
-                                "name": name,
-                                "type": "compound",
-                                "base_type": base_type,
-                                "components": components,
-                                "description": f"{name} compound field"
-                            }
-                            current_message["fields"].append(field)
-
-                        # Handle simple type
-                        else:
-                            field = {
-                                "name": name,
-                                "type": type_def,
-                                "description": f"{name} field"
-                            }
-                            current_message["fields"].append(field)
-
-                # Check for closing brace of message definition
-                elif line == '}':
-                    current_message = None
-                    current_message_name = None
-
-                i += 1
-
-            print(f"Successfully parsed {len(self.messages)} message definitions.")
-            return True
-
-        except Exception as e:
-            print(f"Error parsing input file: {str(e)}")
-            return False
+        parser = MessageParser(self.input_file)
+        self.model = parser.parse()
+        return self.model is not None
 
     def generate_cpp_output(self) -> bool:
         """
@@ -177,87 +72,12 @@ class MessageFormatConverter:
         Returns:
             bool: True if generation was successful, False otherwise
         """
-        try:
-            print(f"Generating C++ output in: {self.output_dir}")
-
-            # Create output directory if it doesn't exist
-            os.makedirs(self.output_dir, exist_ok=True)
-
-            # Generate header file
-            header_file = os.path.join(self.output_dir, "Messages.h")
-            with open(header_file, 'w') as f:
-                f.write("// Auto-generated message definitions for C++\n")
-                f.write("#pragma once\n\n")
-                f.write("#include \"CoreMinimal.h\"\n\n")
-
-                f.write("namespace Messages {\n\n")
-
-                # Generate enum definitions
-                enums_generated = set()
-                for message_name, message in self.messages.items():
-                    for field in message["fields"]:
-                        if field["type"] == "enum":
-                            enum_name = f"{message_name}_{field['name']}_Enum"
-                            if enum_name not in enums_generated:
-                                f.write(f"    // Enum for {message_name}.{field['name']}\n")
-                                f.write(f"    enum class {enum_name} : uint8\n")
-                                f.write("    {\n")
-                                for i, value in enumerate(field["enum_values"]):
-                                    f.write(f"        {value} = {i},\n")
-                                f.write("    };\n\n")
-                                enums_generated.add(enum_name)
-
-                # First pass: forward declare all structs
-                for message_name in self.messages:
-                    f.write(f"    struct {message_name};\n")
-                f.write("\n")
-
-                # Second pass: generate struct definitions
-                for message_name, message in self.messages.items():
-                    f.write(f"    // {message['description']}\n")
-
-                    # Handle inheritance
-                    if message["parent"]:
-                        f.write(f"    struct {message_name} : public {message['parent']}\n")
-                    else:
-                        f.write(f"    struct {message_name}\n")
-
-                    f.write("    {\n")
-
-                    # Generate fields
-                    for field in message["fields"]:
-                        if field["type"] == "enum":
-                            enum_name = f"{message_name}_{field['name']}_Enum"
-                            f.write(f"        {enum_name} {field['name']};\n")
-                        elif field["type"] == "compound":
-                            # For compound fields like position with x, y, z
-                            if field["base_type"] == "float":
-                                f.write(f"        struct {{\n")
-                                for component in field["components"]:
-                                    f.write(f"            float {component};\n")
-                                f.write(f"        }} {field['name']};\n")
-                            else:
-                                # Handle other compound types if needed
-                                f.write(f"        // Unsupported compound type: {field['base_type']}\n")
-                        elif field["type"] == "string":
-                            f.write(f"        FString {field['name']};\n")
-                        elif field["type"] == "int":
-                            f.write(f"        int32 {field['name']};\n")
-                        elif field["type"] == "float":
-                            f.write(f"        float {field['name']};\n")
-                        else:
-                            f.write(f"        // Unsupported type: {field['type']}\n")
-
-                    f.write("    };\n\n")
-
-                f.write("} // namespace Messages\n")
-
-            print(f"Generated C++ header file: {header_file}")
-            return True
-
-        except Exception as e:
-            print(f"Error generating C++ output: {str(e)}")
+        if not self.model:
+            print("Error: No message model available. Parse input file first.")
             return False
+
+        generator = CppGenerator(self.model, self.output_dir)
+        return generator.generate()
 
     def generate_typescript_output(self) -> bool:
         """
@@ -266,76 +86,12 @@ class MessageFormatConverter:
         Returns:
             bool: True if generation was successful, False otherwise
         """
-        try:
-            print(f"Generating TypeScript output in: {self.output_dir}")
-
-            # Create output directory if it doesn't exist
-            os.makedirs(self.output_dir, exist_ok=True)
-
-            # Generate TypeScript file
-            ts_file = os.path.join(self.output_dir, "messages.ts")
-            with open(ts_file, 'w') as f:
-                f.write("// Auto-generated message definitions for TypeScript\n\n")
-                f.write("export namespace Messages {\n\n")
-
-                # Generate enum definitions
-                enums_generated = set()
-                for message_name, message in self.messages.items():
-                    for field in message["fields"]:
-                        if field["type"] == "enum":
-                            enum_name = f"{message_name}_{field['name']}_Enum"
-                            if enum_name not in enums_generated:
-                                f.write(f"    // Enum for {message_name}.{field['name']}\n")
-                                f.write(f"    export enum {enum_name} {{\n")
-                                for i, value in enumerate(field["enum_values"]):
-                                    f.write(f"        {value} = {i},\n")
-                                f.write("    }\n\n")
-                                enums_generated.add(enum_name)
-
-                # Generate interface definitions
-                for message_name, message in self.messages.items():
-                    f.write(f"    // {message['description']}\n")
-
-                    # Handle inheritance
-                    if message["parent"]:
-                        f.write(f"    export interface {message_name} extends {message['parent']} {{\n")
-                    else:
-                        f.write(f"    export interface {message_name} {{\n")
-
-                    # Generate fields
-                    for field in message["fields"]:
-                        if field["type"] == "enum":
-                            enum_name = f"{message_name}_{field['name']}_Enum"
-                            f.write(f"        {field['name']}: {enum_name};\n")
-                        elif field["type"] == "compound":
-                            # For compound fields like position with x, y, z
-                            if field["base_type"] == "float":
-                                f.write(f"        {field['name']}: {{\n")
-                                for component in field["components"]:
-                                    f.write(f"            {component}: number;\n")
-                                f.write("        };\n")
-                            else:
-                                # Handle other compound types if needed
-                                f.write(f"        // Unsupported compound type: {field['base_type']}\n")
-                        elif field["type"] == "string":
-                            f.write(f"        {field['name']}: string;\n")
-                        elif field["type"] == "int":
-                            f.write(f"        {field['name']}: number;\n")
-                        elif field["type"] == "float":
-                            f.write(f"        {field['name']}: number;\n")
-                        else:
-                            f.write(f"        // Unsupported type: {field['type']}\n")
-
-                    f.write("    }\n\n")
-
-                f.write("} // namespace Messages\n")
-
-            print(f"Generated TypeScript file: {ts_file}")
-            return True
-
-        except Exception as e:
-            print(f"Error generating TypeScript output: {str(e)}")
+        if not self.model:
+            print("Error: No message model available. Parse input file first.")
             return False
+
+        generator = TypeScriptGenerator(self.model, self.output_dir)
+        return generator.generate()
 
 
 def parse_arguments():
@@ -356,9 +112,9 @@ def parse_arguments():
     parser.add_argument('--ts', action='store_true', help='Generate TypeScript output')
     parser.add_argument('--language', '-l', choices=['cpp', 'typescript', 'all'], 
                         help='Output language format (cpp, typescript, or all)')
-    
+
     args = parser.parse_args()
-    
+
     # Handle the relationship between --language and --cpp/--ts flags
     if args.language:
         # If --language is specified, it overrides individual flags
@@ -382,7 +138,7 @@ def parse_arguments():
             args.cpp = True
             args.ts = True
             args.language = 'all'
-            
+
     return args
 
 
@@ -395,7 +151,7 @@ def main():
     # Override with environment variables if set
     input_file = os.environ.get('MW_INPUT_FILE', args.input)
     output_dir = os.environ.get('MW_OUTPUT_DIR', args.output)
-    
+
     # Handle environment variable for language preference
     if 'MW_LANGUAGE' in os.environ:
         env_language = os.environ['MW_LANGUAGE'].lower()
