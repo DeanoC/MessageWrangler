@@ -13,6 +13,7 @@
 3. [Code Generation Process](#code-generation-process)
    - [C++ Code Generation](#c-code-generation)
    - [TypeScript Code Generation](#typescript-code-generation)
+   - [JSON Schema Generation](#json-schema-generation)
    - [Type Mappings](#type-mappings)
 4. [Future Extensions](#future-extensions)
    - [Additional Data Types](#additional-data-types)
@@ -30,9 +31,9 @@
 
 ## Introduction
 
-This document describes the message format used for communication between an Electron application and Unreal Engine 5 over WebSocket. The system uses a single source file (.def) to define messages that are then converted into both C++ (for Unreal Engine) and TypeScript (for Electron) code.
+This document describes the message format used for communication between an Electron application and Unreal Engine 5 over WebSocket. The system uses a single source file (.def) to define messages that are then converted into C++ (for Unreal Engine), TypeScript (for Electron), and JSON schema formats.
 
-The message format converter is implemented in Python and can be found in `script.py`. It processes a .def file and generates the corresponding C++ and TypeScript code.
+The message format converter is implemented in Python and can be found in `message_wrangler.py`. It processes a .def file and generates the corresponding C++, TypeScript, and JSON schema code.
 
 ## Current Message Format
 
@@ -277,17 +278,104 @@ export namespace Messages {
 } // namespace Messages
 ```
 
+### JSON Schema Generation
+
+For JSON schema, the converter generates a file (`messages.json`) with the following structure:
+
+1. **Schema Definition**: The file includes standard JSON schema metadata like $schema, title, and description.
+2. **Definitions**: Each message is defined as a JSON schema object under the "definitions" property.
+3. **Properties**: Each field in a message is defined as a property with appropriate type and description.
+4. **Inheritance**: Inheritance relationships are preserved using the "allOf" keyword with a reference to the parent schema.
+5. **Enums**: Enum fields include both the numeric values and the corresponding names.
+6. **Compound Fields**: Compound fields are implemented as nested object schemas with their own properties.
+
+Example JSON schema output:
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Message Definitions",
+  "description": "JSON schema for message definitions",
+  "definitions": {
+    "ToolToUnrealCmd": {
+      "type": "object",
+      "description": "ToolToUnrealCmd message",
+      "properties": {
+        "command": {
+          "description": "command enum field",
+          "type": "integer",
+          "enum": [0, 1],
+          "enumNames": ["Ping", "Position"]
+        },
+        "verb": {
+          "description": "verb field",
+          "type": "string"
+        },
+        "actor": {
+          "description": "actor field",
+          "type": "string"
+        }
+      },
+      "required": ["command", "verb", "actor"]
+    },
+    "UnrealToToolCmdReply": {
+      "type": "object",
+      "description": "UnrealToToolCmdReply message",
+      "properties": {
+        "status": {
+          "description": "status enum field",
+          "type": "integer",
+          "enum": [0, 1],
+          "enumNames": ["OK", "FAIL"]
+        }
+      },
+      "required": ["status"]
+    },
+    "UnrealToToolCmdUpdateReply": {
+      "type": "object",
+      "description": "UnrealToToolCmdUpdateReply message",
+      "properties": {
+        "position": {
+          "description": "position compound field",
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "description": "x component"
+            },
+            "y": {
+              "type": "number",
+              "description": "y component"
+            },
+            "z": {
+              "type": "number",
+              "description": "z component"
+            }
+          },
+          "required": ["x", "y", "z"]
+        }
+      },
+      "required": ["position"],
+      "allOf": [
+        {
+          "$ref": "#/definitions/UnrealToToolCmdReply"
+        }
+      ]
+    }
+  }
+}
+```
+
 ### Type Mappings
 
 The following table shows how types are mapped between the .def file, C++, and TypeScript:
 
-| .def Type | C++ Type | TypeScript Type |
-|-----------|----------|----------------|
-| string    | FString  | string         |
-| int       | int32    | number         |
-| float     | float    | number         |
-| enum      | enum class | enum         |
-| compound  | struct   | object         |
+| .def Type | C++ Type | TypeScript Type | JSON Schema Type |
+|-----------|----------|----------------|----------------|
+| string    | FString  | string         | string         |
+| int       | int32    | number         | integer        |
+| float     | float    | number         | number         |
+| enum      | enum class | enum         | integer + enum |
+| compound  | struct   | object         | object         |
 
 ## Future Extensions
 
@@ -330,7 +418,61 @@ The current message format is functional but basic. Below is a prioritized todo 
   ```
   This would allow messages to contain collections of values.
 
-- [ ] **Documentation Comments**
+- [x] **Documentation Comments**
+
+  The generated output files now include comprehensive self-documenting comments that explain the message format and provide detailed information about each message and field. These comments allow someone (human or AI) to generate a reader for that particular output from just the output file.
+
+  For C++ output:
+  ```cpp
+  // Auto-generated message definitions for C++
+  // This file contains message definitions for communication between systems.
+  //
+  // DOCUMENTATION FOR MESSAGE FORMAT:
+  // ===============================
+  // This file defines a set of message structures used for communication.
+  // Each message is defined as a C++ struct within the Messages namespace.
+  //
+  // Message Structure:
+  // - Messages are defined as structs with specific fields
+  // - Messages can inherit from other messages using standard C++ inheritance
+  // - Fields can be of the following types:
+  //   * Basic types: int32 (integer), float, FString (string)
+  //   * Enum types: defined as enum class with uint8 underlying type
+  //   * Compound types: struct with named components
+
+  /**
+   * @struct ToolToUnrealCmd
+   * @brief ToolToUnrealCmd message
+   *
+   * @details Fields:
+   * - command: Enum (ToolToUnrealCmd_command_Enum) - command enum field
+   * - verb: String (FString) - verb field
+   * - actor: String (FString) - actor field
+   */
+  ```
+
+  For TypeScript output:
+  ```typescript
+  // Auto-generated message definitions for TypeScript
+  // This file contains message definitions for communication between systems.
+  //
+  // DOCUMENTATION FOR MESSAGE FORMAT:
+  // ===============================
+  // This file defines a set of message interfaces used for communication.
+  // Each message is defined as a TypeScript interface within the Messages namespace.
+
+  /**
+   * ToolToUnrealCmd message
+   *
+   * @property {ToolToUnrealCmd_command_Enum} command - command enum field
+   * @property {string} verb - verb field
+   * @property {string} actor - actor field
+   */
+  ```
+
+  Note: This implementation differs from the original plan in that it generates self-documenting comments in the output files rather than parsing documentation comments from the input file. This approach ensures that the output files are self-contained and can be understood without access to the original message definitions.
+
+- [x] **User-Supplied Comments**
   ```
   /// This message is sent from the tool to Unreal Engine to issue a command.
   message ToolToUnrealCmd {
@@ -344,7 +486,20 @@ The current message format is functional but basic. Below is a prioritized todo 
       field actor: string
   }
   ```
-  These comments could be included in the generated code as documentation.
+  Users can now add comments in the message definition file to explain the intent and purpose of messages and fields using the `///` syntax. These comments are parsed and included in the generated code (C++, TypeScript, and JSON), providing more context and documentation beyond just the mechanical structure of the messages. This feature is particularly useful for explaining the business logic and use cases for each message and field. The comments are preserved in all generated output formats and appear as documentation comments in the appropriate style for each language.
+
+- [x] **Local Comments**
+  ```
+  // This is a local comment that will not appear in generated files
+  message ToolToUnrealCmd {
+      // This comment is only for internal documentation
+      field command: enum { Ping, Position }
+
+      // This field is used for verb actions
+      field verb: string
+  }
+  ```
+  Users can add local comments in the message definition file using the `//` syntax. These comments are only for the .def file itself and are not propagated to the generated files. This feature allows developers to add notes, explanations, or reminders that are only relevant to those working directly with the message definition file, without cluttering the generated code. Local comments can be placed anywhere in the .def file, including before message definitions, before field definitions, or at the end of blocks.
 
 - [ ] **Namespaces and Modules**
   ```
@@ -370,11 +525,11 @@ The current message format is functional but basic. Below is a prioritized todo 
   ```
   This would allow the system to validate message fields before sending or after receiving, ensuring data integrity.
 
-- [ ] **Message Serialization/Deserialization**
+- [x] **Message Serialization/Deserialization (Partial)**
   ```
-  python script.py --input messages.def --output ./generated --serialization json
+  python message_wrangler.py --input messages.def --output ./generated --json
   ```
-  This would generate code to convert messages to and from JSON, binary, or other formats.
+  This generates a JSON schema that can be used for JSON serialization and validation. Future work could include generating actual serialization/deserialization code for various formats.
 
 - [ ] **Additional Language Support**
   - [ ] C#: For Unity or .NET applications
@@ -383,11 +538,11 @@ The current message format is functional but basic. Below is a prioritized todo 
   - [ ] Swift: For iOS applications
   - [ ] Rust: For high-performance applications
 
-- [ ] **Schema Validation**
+- [x] **Schema Validation**
   ```
-  python script.py --input messages.def --output ./generated --schema
+  python message_wrangler.py --input messages.def --output ./generated --json
   ```
-  This would generate a schema file that could be used to validate messages at runtime.
+  This generates a JSON schema file that can be used to validate messages at runtime. The schema includes type information, enum values, and inheritance relationships.
 
 - [ ] **Versioning Support**
   ```

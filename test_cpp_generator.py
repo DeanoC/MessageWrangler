@@ -9,11 +9,11 @@ import unittest
 from tempfile import TemporaryDirectory
 
 from message_model import FieldType, EnumValue, Field, Message, MessageModel
-from cpp_generator import CppGenerator
+from cpp_generator import UnrealCppGenerator, StandardCppGenerator
 
 
 class TestCppGenerator(unittest.TestCase):
-    """Test cases for the CppGenerator class."""
+    """Test cases for the C++ generator classes."""
 
     def setUp(self):
         """Set up a test model."""
@@ -105,10 +105,10 @@ class TestCppGenerator(unittest.TestCase):
         )
         self.model.add_message(derived_message)
 
-    def test_generate(self):
-        """Test generating C++ code."""
+    def test_unreal_generator(self):
+        """Test generating Unreal Engine C++ code."""
         with TemporaryDirectory() as temp_dir:
-            generator = CppGenerator(self.model, temp_dir)
+            generator = UnrealCppGenerator(self.model, temp_dir)
             result = generator.generate()
             self.assertTrue(result)
             
@@ -138,6 +138,50 @@ class TestCppGenerator(unittest.TestCase):
             self.assertIn("float y", content)
             self.assertIn("float z", content)
             self.assertIn("} position", content)
+            
+            # Check for Unreal-specific elements
+            self.assertIn("CoreMinimal.h", content)
+            self.assertIn("Auto-generated message definitions for Unreal Engine C++", content)
+
+    def test_standard_generator(self):
+        """Test generating standard C++ code."""
+        with TemporaryDirectory() as temp_dir:
+            generator = StandardCppGenerator(self.model, temp_dir)
+            result = generator.generate()
+            self.assertTrue(result)
+            
+            # Check that the output file exists
+            output_file = os.path.join(temp_dir, "StandardMessages.h")
+            self.assertTrue(os.path.exists(output_file))
+            
+            # Read the output file
+            with open(output_file, 'r') as f:
+                content = f.read()
+            
+            # Check that the content contains expected elements
+            self.assertIn("namespace Messages", content)
+            self.assertIn("struct SimpleMessage", content)
+            self.assertIn("struct BaseMessage", content)
+            self.assertIn("struct DerivedMessage : public BaseMessage", content)
+            self.assertIn("std::string stringField", content)
+            self.assertIn("int32_t intField", content)
+            self.assertIn("float floatField", content)
+            self.assertIn("SimpleMessage_status_Enum status", content)
+            self.assertIn("enum class SimpleMessage_status_Enum", content)
+            self.assertIn("OK = 0", content)
+            self.assertIn("ERROR = 1", content)
+            self.assertIn("PENDING = 2", content)
+            self.assertIn("struct {", content)
+            self.assertIn("float x", content)
+            self.assertIn("float y", content)
+            self.assertIn("float z", content)
+            self.assertIn("} position", content)
+            
+            # Check for standard C++-specific elements
+            self.assertIn("#include <string>", content)
+            self.assertIn("#include <cstdint>", content)
+            self.assertIn("Auto-generated message definitions for standard C++", content)
+            self.assertIn("uint8_t", content)
 
 
 if __name__ == '__main__':
