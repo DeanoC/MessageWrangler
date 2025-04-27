@@ -1,0 +1,13 @@
+message ToolToUnrealCmd {
+    field command: enum { Ping, Position };
+    field verb: string
+    field actor: string
+}
+
+message UnrealToToolCmdReply {
+    field status: enum { OK, FAIL }
+}
+
+message UnrealToToolCmdUpdateReply : UnrealToToolCmdReply {
+    field position: float { x, y, z }
+}
