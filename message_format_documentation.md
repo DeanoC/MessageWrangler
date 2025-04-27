@@ -291,159 +291,117 @@ The following table shows how types are mapped between the .def file, C++, and T
 
 ## Future Extensions
 
-The current message format is functional but basic. Here are some ideas for future extensions:
+The current message format is functional but basic. Below is a prioritized todo list of future extensions, ordered by a combination of implementation complexity and user value:
 
-### Additional Data Types
+### Todo List
 
-- **Boolean**: Add support for boolean fields (true/false).
-- **Byte**: Add support for byte fields (8-bit unsigned integers).
-- **Double**: Add support for double-precision floating-point numbers.
-- **Int64**: Add support for 64-bit integers.
-- **UUID**: Add support for universally unique identifiers.
-- **DateTime**: Add support for date and time values.
-- **Color**: Add support for color values (RGBA).
-- **Vector2D/Vector3D/Vector4D**: Add dedicated types for 2D, 3D, and 4D vectors.
-- **Quaternion**: Add support for quaternions (for rotations).
-- **Matrix**: Add support for transformation matrices.
+- [ ] **Additional Data Types**
+  - [ ] Boolean: Add support for boolean fields (true/false)
+  - [ ] Byte: Add support for byte fields (8-bit unsigned integers)
+  - [ ] Double: Add support for double-precision floating-point numbers
+  - [ ] Int64: Add support for 64-bit integers
+  - [ ] Vector2D/Vector3D/Vector4D: Add dedicated types for 2D, 3D, and 4D vectors
+  - [ ] Color: Add support for color values (RGBA)
+  - [ ] Quaternion: Add support for quaternions (for rotations)
+  - [ ] Matrix: Add support for transformation matrices
+  - [ ] UUID: Add support for universally unique identifiers
+  - [ ] DateTime: Add support for date and time values
 
-### Versioning Support
+- [ ] **Optional Fields**
+  ```
+  field description: string optional
+  field metadata: Metadata optional
+  ```
+  This would allow fields to be omitted from messages when not needed.
 
-Add support for message versioning to ensure backward compatibility:
+- [ ] **Default Values**
+  ```
+  field command: enum { Ping, Position } default(Ping)
+  field timeout: int default(30)
+  field enabled: bool default(true)
+  ```
+  This would allow fields to have default values when not explicitly set.
 
-```
-message ToolToUnrealCmd version 2 {
-    // Fields
-}
-```
+- [ ] **Arrays and Collections**
+  ```
+  field tags: string[]
+  field points: Vector3D[]
+  field properties: Map<string, string>
+  ```
+  This would allow messages to contain collections of values.
 
-This would allow the system to handle different versions of the same message, making it easier to evolve the protocol over time.
+- [ ] **Documentation Comments**
+  ```
+  /// This message is sent from the tool to Unreal Engine to issue a command.
+  message ToolToUnrealCmd {
+      /// The type of command to execute.
+      field command: enum { Ping, Position }
 
-### Validation Rules
+      /// The verb describing the action to perform.
+      field verb: string
 
-Add support for field validation rules:
+      /// The actor on which to perform the action.
+      field actor: string
+  }
+  ```
+  These comments could be included in the generated code as documentation.
 
-```
-field age: int min(0) max(120)
-field email: string regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
-field name: string minLength(1) maxLength(100)
-```
+- [ ] **Namespaces and Modules**
+  ```
+  namespace Tool {
+      message Command {
+          // Fields
+      }
+  }
 
-This would allow the system to validate message fields before sending or after receiving, ensuring data integrity.
+  namespace Unreal {
+      message Response {
+          // Fields
+      }
+  }
+  ```
+  This would allow messages to be organized into logical groups.
 
-### Default Values
+- [ ] **Validation Rules**
+  ```
+  field age: int min(0) max(120)
+  field email: string regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+  field name: string minLength(1) maxLength(100)
+  ```
+  This would allow the system to validate message fields before sending or after receiving, ensuring data integrity.
 
-Add support for default values:
+- [ ] **Message Serialization/Deserialization**
+  ```
+  python script.py --input messages.def --output ./generated --serialization json
+  ```
+  This would generate code to convert messages to and from JSON, binary, or other formats.
 
-```
-field command: enum { Ping, Position } default(Ping)
-field timeout: int default(30)
-field enabled: bool default(true)
-```
+- [ ] **Additional Language Support**
+  - [ ] C#: For Unity or .NET applications
+  - [ ] Python: For scripting and tools
+  - [ ] Java/Kotlin: For Android applications
+  - [ ] Swift: For iOS applications
+  - [ ] Rust: For high-performance applications
 
-This would allow fields to have default values when not explicitly set.
+- [ ] **Schema Validation**
+  ```
+  python script.py --input messages.def --output ./generated --schema
+  ```
+  This would generate a schema file that could be used to validate messages at runtime.
 
-### Optional Fields
+- [ ] **Versioning Support**
+  ```
+  message ToolToUnrealCmd version 2 {
+      // Fields
+  }
+  ```
+  This would allow the system to handle different versions of the same message, making it easier to evolve the protocol over time.
 
-Add support for optional fields:
-
-```
-field description: string optional
-field metadata: Metadata optional
-```
-
-This would allow fields to be omitted from messages when not needed.
-
-### Arrays and Collections
-
-Add support for arrays and other collection types:
-
-```
-field tags: string[]
-field points: Vector3D[]
-field properties: Map<string, string>
-```
-
-This would allow messages to contain collections of values.
-
-### Documentation Comments
-
-Add support for documentation comments:
-
-```
-/// This message is sent from the tool to Unreal Engine to issue a command.
-message ToolToUnrealCmd {
-    /// The type of command to execute.
-    field command: enum { Ping, Position }
-    
-    /// The verb describing the action to perform.
-    field verb: string
-    
-    /// The actor on which to perform the action.
-    field actor: string
-}
-```
-
-These comments could be included in the generated code as documentation.
-
-### Namespaces and Modules
-
-Add support for namespaces or modules to organize messages:
-
-```
-namespace Tool {
-    message Command {
-        // Fields
-    }
-}
-
-namespace Unreal {
-    message Response {
-        // Fields
-    }
-}
-```
-
-This would allow messages to be organized into logical groups.
-
-### Additional Language Support
-
-Extend the code generator to support additional languages:
-
-- **C#**: For Unity or .NET applications
-- **Java/Kotlin**: For Android applications
-- **Swift**: For iOS applications
-- **Python**: For scripting and tools
-- **Rust**: For high-performance applications
-
-### Schema Validation
-
-Add support for generating JSON Schema or similar validation schemas for the message format:
-
-```
-python script.py --input messages.def --output ./generated --schema
-```
-
-This would generate a schema file that could be used to validate messages at runtime.
-
-### Binary Format Support
-
-Add support for binary serialization formats like Protocol Buffers, FlatBuffers, or Cap'n Proto:
-
-```
-python script.py --input messages.def --output ./generated --binary-format protobuf
-```
-
-This would generate code for efficient binary serialization and deserialization.
-
-### Message Serialization/Deserialization
-
-Add support for generating serialization and deserialization code:
-
-```
-python script.py --input messages.def --output ./generated --serialization json
-```
-
-This would generate code to convert messages to and from JSON, binary, or other formats.
+- [ ] **Binary Format Support**
+  ```
+  python script.py --input messages.def --output ./generated --binary-format protobuf
+  ```
+  This would generate code for efficient binary serialization and deserialization.
 
 ---
 
