@@ -1,7 +1,7 @@
 # MessageWrangler
 # MessageWrangler
 
-MessageWrangler is a utility that processes message definitions from a source file and generates both C++ and TypeScript compatible message formats. This tool is designed to facilitate communication between an Electron app and Unreal Engine over WebSocket.
+MessageWrangler is a utility that processes message definitions from a source file and generates C++, TypeScript, and Python compatible message formats. This tool is designed to facilitate communication between an Electron app and Unreal Engine over WebSocket.
 
 ## Installation
 
@@ -21,13 +21,14 @@ MessageWrangler is a utility that processes message definitions from a source fi
 The script can be run in several ways:
 
 ### Direct execution
-MessageWrangler is a utility for converting message definitions from a single source format into both C++ and TypeScript implementations. This enables seamless communication between an Electron application (TypeScript) and Unreal Engine (C++) over WebSocket connections.
+MessageWrangler is a utility for converting message definitions from a single source format into C++, TypeScript, and Python implementations. This enables seamless communication between an Electron application (TypeScript), Unreal Engine (C++), and Python applications over WebSocket connections.
 
 ## Features
 
 - Parse message definitions from a single source file
 - Generate C++ header files with proper UE4/UE5 types
 - Generate TypeScript interface definitions
+- Generate Python dataclasses with type annotations
 - Support for inheritance between message types
 - Support for enums and compound types
 - Automatic type conversion between languages

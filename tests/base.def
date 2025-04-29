@@ -1,0 +1,11 @@
+message BaseMessage {
+    field baseField: string
+}
+
+message AnotherBaseMessage {
+    field anotherField: int
+}
+
+message ChildMessage : BaseMessage {
+    field childField: float
+}

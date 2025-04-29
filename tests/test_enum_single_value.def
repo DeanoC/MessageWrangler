@@ -1,0 +1,6 @@
+message TestMessage {
+    field type: enum {
+        Status
+    }
+    field key: string
+}

@@ -22,16 +22,18 @@ class JsonGenerator:
     Generator for JSON schema definitions from the intermediate representation.
     """
 
-    def __init__(self, model: MessageModel, output_dir: str):
+    def __init__(self, model: MessageModel, output_dir: str, output_name: str = None):
         """
         Initialize the generator with the message model and output directory.
 
         Args:
             model: The message model to generate code from
             output_dir: Directory where output files will be generated
+            output_name: Base name for output files without extension (default: "messages")
         """
         self.model = model
         self.output_dir = output_dir
+        self.output_name = output_name if output_name else "messages"
 
     def generate(self) -> bool:
         """
@@ -46,8 +48,8 @@ class JsonGenerator:
             # Create output directory if it doesn't exist
             os.makedirs(self.output_dir, exist_ok=True)
 
-            # Generate JSON schema file
-            json_file = os.path.join(self.output_dir, "messages.json")
+            # Generate JSON schema file with custom name
+            json_file = os.path.join(self.output_dir, f"{self.output_name}.json")
 
             # Create the schema object
             schema = {
@@ -57,9 +59,11 @@ class JsonGenerator:
                 "definitions": {}
             }
 
-            # Add all message definitions
+            # Add all message definitions, using fully qualified names for namespaced messages
             for message_name, message in self.model.messages.items():
-                schema["definitions"][message_name] = self._create_message_schema(message)
+                # Use fully qualified name for the schema definition
+                schema_key = message.get_full_name()
+                schema["definitions"][schema_key] = self._create_message_schema(message)
 
             # Write the schema to file
             with open(json_file, 'w') as f:
@@ -87,6 +91,10 @@ class JsonGenerator:
         if message.comment:
             description = message.comment
 
+        # If message has a namespace, include it in the description
+        if message.namespace:
+            description = f"[Namespace: {message.namespace}] {description}"
+
         schema = {
             "type": "object",
             "description": description,
@@ -98,15 +106,20 @@ class JsonGenerator:
         if message.parent:
             parent_message = self.model.get_message(message.parent)
             if parent_message:
+                # If parent is in a namespace, include the namespace in the reference
+                parent_ref = message.parent
+                if parent_message.namespace:
+                    parent_ref = f"{parent_message.namespace}::{parent_message.name}"
                 schema["allOf"] = [
-                    {"$ref": f"#/definitions/{message.parent}"}
+                    {"$ref": f"#/definitions/{parent_ref}"}
                 ]
 
         # Add properties for each field
         for field in message.fields:
             field_schema = self._create_field_schema(field, message.name)
             schema["properties"][field.name] = field_schema
-            schema["required"].append(field.name)  # All fields are required
+            if not field.optional:  # Only add non-optional fields to required array
+                schema["required"].append(field.name)
 
         return schema
 
@@ -130,6 +143,24 @@ class JsonGenerator:
             "description": description
         }
 
+        # Add default value if specified
+        if field.default_value is not None:
+            # For enum fields, use the numeric value
+            if field.field_type == FieldType.ENUM:
+                # Find the enum value with the matching name
+                for enum_value in field.enum_values:
+                    if enum_value.name == field.default_value:
+                        schema["default"] = enum_value.value
+                        break
+            elif field.field_type == FieldType.STRING:
+                # Remove extra quotes from string default values
+                default_value = field.default_value
+                if isinstance(default_value, str) and default_value.startswith('"') and default_value.endswith('"'):
+                    default_value = default_value[1:-1]
+                schema["default"] = default_value
+            else:
+                schema["default"] = field.default_value
+
         if field.field_type == FieldType.STRING:
             schema["type"] = "string"
 
@@ -139,10 +170,24 @@ class JsonGenerator:
         elif field.field_type == FieldType.FLOAT:
             schema["type"] = "number"
 
+        elif field.field_type == FieldType.BOOLEAN:
+            schema["type"] = "boolean"
+
+        elif field.field_type == FieldType.BYTE:
+            schema["type"] = "integer"
+            schema["minimum"] = 0
+            schema["maximum"] = 255
+
         elif field.field_type == FieldType.ENUM:
             schema["type"] = "integer"
             schema["enum"] = [value.value for value in field.enum_values]
             schema["enumNames"] = [value.name for value in field.enum_values]
+
+        elif field.field_type == FieldType.OPTIONS:
+            schema["type"] = "integer"
+            schema["description"] = f"{description} (bit flags)"
+            # Add information about the available options
+            schema["options"] = [{"name": value.name, "value": value.value} for value in field.enum_values]
 
         elif field.field_type == FieldType.COMPOUND:
             schema["type"] = "object"
@@ -170,25 +215,38 @@ class JsonGenerator:
         Returns:
             A human-readable description of the field type
         """
+        optional_text = " (optional)" if field.optional else ""
+        default_text = f" default({field.default_value})" if field.default_value is not None else ""
+
         if field.field_type == FieldType.ENUM:
             enum_name = f"{message_name}_{field.name}_Enum"
-            return f"Enum ({enum_name})"
+            return f"Enum ({enum_name}){optional_text}{default_text}"
+
+        elif field.field_type == FieldType.OPTIONS:
+            options_values = ", ".join([value.name for value in field.enum_values])
+            return f"Options (bit flags: {options_values}){optional_text}{default_text}"
 
         elif field.field_type == FieldType.COMPOUND:
             if field.compound_base_type == "float":
                 components = ", ".join(field.compound_components)
-                return f"Compound object with components: {components}"
+                return f"Compound object with components: {components}{optional_text}{default_text}"
             else:
-                return f"Compound object of type {field.compound_base_type}"
+                return f"Compound object of type {field.compound_base_type}{optional_text}{default_text}"
 
         elif field.field_type == FieldType.STRING:
-            return "String"
+            return f"String{optional_text}{default_text}"
 
         elif field.field_type == FieldType.INT:
-            return "Integer"
+            return f"Integer{optional_text}{default_text}"
 
         elif field.field_type == FieldType.FLOAT:
-            return "Float"
+            return f"Float{optional_text}{default_text}"
+
+        elif field.field_type == FieldType.BOOLEAN:
+            return f"Boolean{optional_text}{default_text}"
+
+        elif field.field_type == FieldType.BYTE:
+            return f"Byte (0-255){optional_text}{default_text}"
 
         else:
-            return f"Unknown ({field.field_type})"
+            return f"Unknown ({field.field_type}){optional_text}{default_text}"

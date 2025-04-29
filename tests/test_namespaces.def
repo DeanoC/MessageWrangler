@@ -1,0 +1,35 @@
+/// Tool namespace contains messages sent from the tool to Unreal Engine
+namespace Tool {
+    /// Base command message for all tool commands
+    message Command {
+        /// The type of command to execute
+        field type: string
+        
+        /// The command ID for tracking responses
+        field id: string
+    }
+    
+    /// Position command requests location information
+    message PositionCommand : Command {
+        /// The actor to get position for
+        field actor: string
+    }
+}
+
+/// Unreal namespace contains messages sent from Unreal Engine to the tool
+namespace Unreal {
+    /// Base response message for all Unreal responses
+    message Response {
+        /// The status of the command execution
+        field status: enum { Success, Failure }
+        
+        /// The ID of the command this is responding to
+        field commandId: string
+    }
+    
+    /// Position response includes position information
+    message PositionResponse : Response {
+        /// The position in 3D space
+        field position: float { x, y, z }
+    }
+}

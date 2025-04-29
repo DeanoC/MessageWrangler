@@ -2,7 +2,7 @@
 Message Model
 
 This module defines the intermediate representation for message definitions.
-It provides classes for representing messages, fields, enums, and other components
+It provides classes for representing messages, fields, enums, namespaces, and other components
 of the message definition format.
 """
 
@@ -15,8 +15,30 @@ class FieldType(Enum):
     STRING = "string"
     INT = "int"
     FLOAT = "float"
+    BOOLEAN = "bool"
+    BYTE = "byte"
     ENUM = "enum"
     COMPOUND = "compound"
+    OPTIONS = "options"
+    MESSAGE = "message"  # Reference to another message
+
+
+class Namespace:
+    """Represents a namespace containing messages."""
+
+    def __init__(self, name: str, description: str = "", comment: str = ""):
+        """
+        Initialize a namespace.
+
+        Args:
+            name: The name of the namespace
+            description: Optional description of the namespace
+            comment: Optional user-supplied comment for the namespace
+        """
+        self.name = name
+        self.description = description
+        self.comment = comment
+        self.messages: Dict[str, Message] = {}
 
 
 class EnumValue:
@@ -69,7 +91,7 @@ class CompoundField:
 class Field:
     """Represents a field in a message."""
 
-    def __init__(self, name: str, field_type: FieldType, description: str = "", comment: str = ""):
+    def __init__(self, name: str, field_type: FieldType, description: str = "", comment: str = "", optional: bool = False, default_value: Any = None):
         """
         Initialize a field.
 
@@ -78,11 +100,16 @@ class Field:
             field_type: The type of the field
             description: Optional description of the field
             comment: Optional user-supplied comment for the field
+            optional: Whether the field is optional (can be omitted)
+            default_value: Optional default value for the field
         """
         self.name = name
         self.field_type = field_type
         self.description = description
         self.comment = comment
+        self.optional = optional
+        self.default_value = default_value
+        self.default_value_str: Optional[str] = None  # Original string representation of default value for options
         self.enum_values: List[EnumValue] = []
         self.compound_base_type: str = ""
         self.compound_components: List[str] = []
@@ -91,21 +118,36 @@ class Field:
 class Message:
     """Represents a message definition."""
 
-    def __init__(self, name: str, parent: Optional[str] = None, description: str = "", comment: str = ""):
+    def __init__(self, name: str, parent: Optional[str] = None, namespace: Optional[str] = None, description: str = "", comment: str = "", source_file: Optional[str] = None):
         """
         Initialize a message.
 
         Args:
             name: The name of the message
             parent: Optional parent message name (for inheritance)
+            namespace: Optional namespace name
             description: Optional description of the message
             comment: Optional user-supplied comment for the message
+            source_file: Optional source file path where the message was defined
         """
         self.name = name
         self.parent = parent
+        self.namespace = namespace
         self.description = description
         self.comment = comment
+        self.source_file = source_file
         self.fields: List[Field] = []
+
+    def get_full_name(self) -> str:
+        """
+        Get the fully qualified name of the message, including namespace.
+
+        Returns:
+            The fully qualified name of the message
+        """
+        if self.namespace:
+            return f"{self.namespace}::{self.name}"
+        return self.name
 
 
 class MessageModel:
@@ -118,6 +160,7 @@ class MessageModel:
     def __init__(self):
         """Initialize an empty message model."""
         self.messages: Dict[str, Message] = {}
+        self.namespaces: Dict[str, Namespace] = {}
 
     def add_message(self, message: Message) -> None:
         """
@@ -126,16 +169,57 @@ class MessageModel:
         Args:
             message: The message to add
         """
-        self.messages[message.name] = message
+        # Add to global messages dictionary
+        self.messages[message.get_full_name()] = message
+
+        # If message has a namespace, add it to the namespace's messages
+        if message.namespace:
+            if message.namespace not in self.namespaces:
+                self.namespaces[message.namespace] = Namespace(message.namespace)
+            self.namespaces[message.namespace].messages[message.name] = message
+
+    def add_namespace(self, namespace: Namespace) -> None:
+        """
+        Add a namespace to the model.
+
+        Args:
+            namespace: The namespace to add
+        """
+        self.namespaces[namespace.name] = namespace
 
     def get_message(self, name: str) -> Optional[Message]:
         """
         Get a message by name.
 
         Args:
-            name: The name of the message to get
+            name: The name of the message to get (can be fully qualified or not)
 
         Returns:
             The message, or None if not found
         """
+        # First try to get the message directly (assuming it's a fully qualified name)
+        message = self.messages.get(name)
+        if message:
+            return message
+
+        # If not found, try to parse as namespace::message
+        if '::' in name:
+            namespace_name, message_name = name.split('::', 1)
+            namespace = self.namespaces.get(namespace_name)
+            if namespace:
+                return namespace.messages.get(message_name)
+
+        # If still not found, try to find it in the global scope (no namespace)
         return self.messages.get(name)
+
+    def get_namespace(self, name: str) -> Optional[Namespace]:
+        """
+        Get a namespace by name.
+
+        Args:
+            name: The name of the namespace to get
+
+        Returns:
+            The namespace, or None if not found
+        """
+        return self.namespaces.get(name)

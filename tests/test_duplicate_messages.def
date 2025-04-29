@@ -1,0 +1,48 @@
+/// Test file for duplicate message detection
+
+/// Base message for all commands
+message BaseCommand {
+    /// The type of command
+    field type: enum {
+        Status
+    }
+    field key: string
+}
+
+/// Base message for all replies
+message BaseReply {
+    /// The status of the command execution
+    field status: enum {
+        Success,
+        Failure,
+        Pending
+    }
+    field key: string
+}
+
+/// Command the client can send to the server
+namespace ClientCommands {
+    /// Client to server messages
+    message ChangeMode : BaseCommand {
+        field Mode: enum {
+            /// Connect to the Unreal target through the server
+            Live,
+            /// Replay an previous Unreal session recorded by the server
+            Replay,
+            /// Connect to the Unreal Editor through the server
+            Editor
+        }
+    }
+    
+    /// Duplicate message definition in the same namespace
+    message ChangeMode : BaseCommand {
+        field Mode: enum {
+            /// Connect to the Unreal target through the server
+            Live,
+            /// Replay an previous Unreal session recorded by the server
+            Replay,
+            /// Connect to the Unreal Editor through the server
+            Editor
+        }
+    }
+}
