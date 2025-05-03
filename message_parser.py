@@ -744,11 +744,109 @@ class MessageParser:
                     self.warnings.append(warning_msg)
                     default_value = None
 
-        # Check for enum references from other messages (e.g., ChangeMode.Mode)
+        # Handle enum references from other messages (e.g., ChangeMode.Mode or Namespace::ChangeMode.Mode)
+        # Also handle extended enum references (e.g., ChangeMode.Mode + { AdditionalValue1, AdditionalValue2 = 100 })
         if '.' in type_def and not type_def.startswith(('enum', 'options')):
+            # Check if this is an extended enum reference
+            has_additional_values = '+' in type_def and '{' in type_def and '}' in type_def
+
             # Extract just the field type (in case there's more content after it)
-            field_type = type_def.split()[0] if ' ' in type_def else type_def
-            self.errors.append(f"Line {line_number}: Field type '{field_type}' references an enum from another message. This is not currently supported.")
+            if has_additional_values:
+                # For extended enum references, get everything before the '+'
+                field_type = type_def.split('+')[0].strip()
+
+                # Get the additional enum values part (everything between the first { and the last })
+                additional_values_str = type_def[type_def.find('{')+1:type_def.rfind('}')].strip()
+            else:
+                field_type = type_def.split()[0] if ' ' in type_def else type_def
+
+            # Split the field type into message name and enum name
+            message_name, enum_name = field_type.rsplit('.', 1)
+
+            # Check if the referenced message exists
+            referenced_message = self.model.get_message(message_name)
+            if not referenced_message:
+                self.errors.append(f"Line {line_number}: Message '{message_name}' referenced by enum reference '{field_type}' in field '{name}' of message '{message.name}' not found.")
+                return
+
+            # Create a field with the enum reference
+            field = Field(
+                name=name,
+                field_type=FieldType.ENUM,
+                description=f"{name} enum field (reference to {field_type})",
+                comment=comment,
+                optional=optional,
+                default_value=default_value
+            )
+
+            # Store the reference to the enum
+            field.enum_reference = field_type
+
+            # Parse additional enum values if present
+            if has_additional_values:
+                # Process each line to remove comments
+                processed_lines = []
+                for line in additional_values_str.split('\n'):
+                    # Remove comments (anything after //)
+                    if '//' in line:
+                        line = line[:line.find('//')]
+                    processed_lines.append(line.strip())
+
+                # Join the processed lines
+                additional_values_str = ' '.join(processed_lines)
+
+                # If there are commas, split by commas
+                if ',' in additional_values_str:
+                    enum_values = []
+                    for v in additional_values_str.split(','):
+                        v = v.strip()
+                        if v:  # Skip empty values
+                            enum_values.append(v)
+                # If there are no commas, treat the entire string as a single value
+                else:
+                    enum_values = [additional_values_str.strip()]
+
+                # Debug print
+                self.debug_print(f"DEBUG: Additional enum values: {enum_values}")
+
+                # Create EnumValue objects with support for explicit value assignments
+                current_value = 1000  # Default starting value for additional enum values
+                for value_def in enum_values:
+                    if value_def:  # Skip empty values
+                        # Check if this enum value has an explicit assignment
+                        if '=' in value_def:
+                            # Split at the equals sign
+                            name_part, value_part = value_def.split('=', 1)
+                            value_name = name_part.strip()
+
+                            # Parse the value part as an integer
+                            try:
+                                value_part = value_part.strip()
+                                current_value = int(value_part)
+                            except ValueError:
+                                self.errors.append(f"Line {line_number}: Invalid enum value '{value_part}' for '{value_name}'. Must be an integer.")
+                                continue
+                        else:
+                            # No explicit assignment, use the current value
+                            value_name = value_def.strip()
+
+                        # Check if enum value name is a reserved keyword
+                        if self._is_reserved_keyword(value_name):
+                            self.errors.append(f"Line {line_number}: Enum value '{value_name}' is a reserved keyword and cannot be used.")
+                        else:
+                            enum_value = EnumValue(name=value_name, value=current_value)
+                            field.additional_enum_values.append(enum_value)
+                            # Increment the current value for the next enum value
+                            current_value += 1
+
+                self.debug_print(f"DEBUG: Added {len(field.additional_enum_values)} additional enum values to field '{name}'")
+
+            # Add the field to the message
+            message.fields.append(field)
+
+            # Add a warning that the enum reference will be resolved later
+            self.warnings.append(f"Line {line_number}: Enum reference '{field_type}' will be resolved during validation.")
+
             return
 
         # Check for message references (e.g., Base::BaseMessage or BaseMessage)
@@ -783,6 +881,118 @@ class MessageParser:
 
         # Handle enum type
         if type_def.startswith('enum'):
+            # Check if this is an enum reference (contains a dot)
+            if '.' in type_def and ' ' in type_def:
+                # Extract the enum reference part
+                enum_ref_part = type_def.split(' ', 1)[1].strip()
+                if '+' in enum_ref_part:
+                    # This is an extended enum reference, extract just the enum reference part
+                    enum_ref = enum_ref_part.split('+')[0].strip()
+                else:
+                    enum_ref = enum_ref_part
+
+                # This is an enum reference, extract the message and enum name
+                parts = enum_ref.split('.', 1)
+                if len(parts) == 2:
+                    message_ref = parts[0]
+                    enum_name = parts[1]
+
+                    # Check if the referenced message exists
+                    referenced_message = self.model.get_message(message_ref)
+                    if not referenced_message:
+                        self.errors.append(f"Line {line_number}: Message '{message_ref}' referenced by enum reference '{enum_ref_part}' in field '{name}' of message '{message.name}' not found.")
+                        return
+
+                    # Check if the referenced enum field exists
+                    enum_field = None
+                    for field in referenced_message.fields:
+                        if field.name == enum_name and field.field_type == FieldType.ENUM:
+                            enum_field = field
+                            break
+
+                    if not enum_field:
+                        self.errors.append(f"Line {line_number}: Enum '{enum_name}' not found in message '{message_ref}' referenced by field '{name}' of message '{message.name}'.")
+                        return
+
+                    # Create a field with the enum reference
+                    field = Field(
+                        name=name,
+                        field_type=FieldType.ENUM,
+                        description=f"{name} enum field (reference to {enum_ref})",
+                        comment=comment,
+                        optional=optional,
+                        default_value=default_value
+                    )
+
+                    # Store the reference to the enum
+                    field.enum_reference = f"{message_ref}.{enum_name}"
+
+                    # Parse additional enum values if present
+                    if '+' in enum_ref_part:
+                        # Extract the additional enum values part
+                        additional_values_str = type_def[type_def.find('{')+1:type_def.rfind('}')].strip()
+
+                        # Process each line to remove comments
+                        processed_lines = []
+                        for line in additional_values_str.split('\n'):
+                            # Remove comments (anything after //)
+                            if '//' in line:
+                                line = line[:line.find('//')]
+                            processed_lines.append(line.strip())
+
+                        # Join the processed lines
+                        additional_values_str = ' '.join(processed_lines)
+
+                        # If there are commas, split by commas
+                        if ',' in additional_values_str:
+                            enum_values = []
+                            for v in additional_values_str.split(','):
+                                v = v.strip()
+                                if v:  # Skip empty values
+                                    enum_values.append(v)
+                        # If there are no commas, treat the entire string as a single value
+                        else:
+                            enum_values = [additional_values_str.strip()]
+
+                        # Debug print
+                        self.debug_print(f"DEBUG: Additional enum values: {enum_values}")
+
+                        # Create EnumValue objects with support for explicit value assignments
+                        current_value = 1000  # Default starting value for additional enum values
+                        for value_def in enum_values:
+                            if value_def:  # Skip empty values
+                                # Check if this enum value has an explicit assignment
+                                if '=' in value_def:
+                                    # Split at the equals sign
+                                    name_part, value_part = value_def.split('=', 1)
+                                    value_name = name_part.strip()
+
+                                    # Parse the value part as an integer
+                                    try:
+                                        value_part = value_part.strip()
+                                        current_value = int(value_part)
+                                    except ValueError:
+                                        self.errors.append(f"Line {line_number}: Invalid enum value '{value_part}' for '{value_name}'. Must be an integer.")
+                                        continue
+                                else:
+                                    # No explicit assignment, use the current value
+                                    value_name = value_def.strip()
+
+                                # Check if enum value name is a reserved keyword
+                                if self._is_reserved_keyword(value_name):
+                                    self.errors.append(f"Line {line_number}: Enum value '{value_name}' is a reserved keyword and cannot be used.")
+                                else:
+                                    enum_value = EnumValue(name=value_name, value=current_value)
+                                    field.additional_enum_values.append(enum_value)
+                                    # Increment the current value for the next enum value
+                                    current_value += 1
+
+                        self.debug_print(f"DEBUG: Added {len(field.additional_enum_values)} additional enum values to field '{name}'")
+
+                    # Add the field to the message
+                    message.fields.append(field)
+                    return
+
             # Regular enum field
             field = self._parse_enum_field(name, type_def, line_number)
             if field:
@@ -946,10 +1156,11 @@ class MessageParser:
 
     def _validate_references(self) -> None:
         """
-        Validate all message and namespace references in the model.
+        Validate all message, namespace, and enum references in the model.
 
         This method checks that all parent messages referenced by messages in the model
-        actually exist. If any references are not found, errors are added to the errors list.
+        actually exist, and that all enum references are valid. If any references are not found,
+        errors are added to the errors list.
         """
         # Check all messages for unresolved parent references
         for message_name, message in list(self.model.messages.items()):  # Use list() to avoid modification during iteration
@@ -964,6 +1175,48 @@ class MessageParser:
                     else:
                         # This is a reference to a message in the global scope
                         self.errors.append(f"Error: Parent message '{message.parent}' referenced by '{message_name}' not found.")
+
+            # Check all fields for enum references
+            for field in message.fields:
+                if field.enum_reference:
+                    # Split the reference into message name and enum name
+                    if '.' in field.enum_reference:
+                        message_ref, enum_name = field.enum_reference.rsplit('.', 1)
+
+                        # Get the referenced message
+                        referenced_message = self.model.get_message(message_ref)
+                        if not referenced_message:
+                            self.errors.append(f"Error: Message '{message_ref}' referenced by enum reference '{field.enum_reference}' in field '{field.name}' of message '{message_name}' not found.")
+                            continue
+
+                        # Find the enum field in the referenced message
+                        enum_field = None
+                        for ref_field in referenced_message.fields:
+                            if ref_field.name == enum_name and ref_field.field_type == FieldType.ENUM:
+                                enum_field = ref_field
+                                break
+
+                        if not enum_field:
+                            self.errors.append(f"Error: Enum '{enum_name}' not found in message '{message_ref}' referenced by field '{field.name}' of message '{message_name}'.")
+                            continue
+
+                        # Copy the enum values from the referenced enum field
+                        field.enum_values = enum_field.enum_values.copy()
+
+                        # Add any additional enum values
+                        if field.additional_enum_values:
+                            # Check for duplicate enum value names
+                            existing_names = {ev.name for ev in field.enum_values}
+                            for additional_value in field.additional_enum_values:
+                                if additional_value.name in existing_names:
+                                    self.errors.append(f"Error: Duplicate enum value name '{additional_value.name}' in extended enum reference '{field.enum_reference}' in field '{field.name}' of message '{message_name}'.")
+                                else:
+                                    field.enum_values.append(additional_value)
+                                    existing_names.add(additional_value.name)
+
+                            self.debug_print(f"DEBUG: Added {len(field.additional_enum_values)} additional enum values to field '{field.name}' in message '{message_name}'.")
+                    else:
+                        self.errors.append(f"Error: Invalid enum reference format '{field.enum_reference}' in field '{field.name}' of message '{message_name}'. Expected format is 'MessageName.EnumName' or 'Namespace::MessageName.EnumName'.")
 
         # Don't convert warnings about unresolved parents to errors
         # This allows messages with parent references to imported messages to be included in the model

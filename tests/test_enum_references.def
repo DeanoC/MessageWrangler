@@ -1,0 +1,51 @@
+// Test file for enum references
+
+// Define a message with an enum
+message EnumContainer {
+    field status: enum { OK = 0, ERROR = 1, WARNING = 2 }
+}
+
+// Define a message that references the enum
+message EnumUser {
+    field containerStatus: EnumContainer.status
+}
+
+// Define a message in a namespace
+namespace Test {
+    message NamespacedEnum {
+        field level: enum { LOW = 0, MEDIUM = 1, HIGH = 2 }
+    }
+}
+
+// Define a message that references an enum in a namespace
+message NamespacedEnumUser {
+    field testLevel: Test::NamespacedEnum.level
+}
+
+// Define a message with multiple enum fields
+message MultipleEnums {
+    field type: enum { TYPE_A = 0, TYPE_B = 1 }
+    field state: enum { ON = 1, OFF = 0 }
+}
+
+// Define a message that references multiple enums
+message MultipleEnumUser {
+    field multiType: MultipleEnums.type
+    field multiState: MultipleEnums.state
+}
+
+// Define a message that references an enum and adds additional values
+message ExtendedEnumUser {
+    field extendedStatus: EnumContainer.status + { CRITICAL = 100, UNKNOWN = 101 }
+}
+
+// Define a message that references an enum in a namespace and adds additional values
+message ExtendedNamespacedEnumUser {
+    field extendedLevel: Test::NamespacedEnum.level + { EXTREME = 100, UNKNOWN }
+}
+
+// Define a message that references multiple enums and adds additional values to each
+message ExtendedMultipleEnumUser {
+    field extendedType: MultipleEnums.type + { TYPE_C = 100, TYPE_D }
+    field extendedState: MultipleEnums.state + { PENDING = 100 }
+}

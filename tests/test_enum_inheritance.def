@@ -1,0 +1,8 @@
+import "./sh4c_base.def" as Base
+
+/// Command the client can send to the server
+namespace ClientCommands {
+    message CommCommand : Base::Command {
+        field typeX: enum Base::Command.type + enum { ChangeMode }
+    }
+}

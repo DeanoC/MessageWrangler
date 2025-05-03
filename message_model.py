@@ -113,6 +113,8 @@ class Field:
         self.enum_values: List[EnumValue] = []
         self.compound_base_type: str = ""
         self.compound_components: List[str] = []
+        self.enum_reference: Optional[str] = None  # Reference to an enum in another message
+        self.additional_enum_values: List[EnumValue] = []  # Additional enum values for extended enum references
 
 
 class Message:

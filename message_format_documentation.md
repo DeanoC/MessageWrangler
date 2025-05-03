@@ -799,17 +799,84 @@ While the current message format system is already feature-rich, there are still
   ```
   This would generate code for efficient binary serialization and deserialization.
 
-- [ ] **Enum References**
-  ```
-  field mode: ChangeMode.Mode
-  ```
-  This would allow fields to reference enum types defined in other messages, enabling better code organization and reuse of enum definitions. Currently, referencing enums from other messages is not supported and will generate an error.
+- [x] **Enum References**
+```
+field mode: ChangeMode.Mode
+field namespaceMode: Namespace::ChangeMode.Mode
+field extendedMode: ChangeMode.Mode + { ADDITIONAL_MODE = 100, ANOTHER_MODE }
+```
+This allows fields to reference enum types defined in other messages, enabling better code organization and reuse of enum definitions. Enum references can be to messages in the global scope or in namespaces. Additionally, enum references can be extended with additional values using the `+` operator followed by a list of additional enum values in curly braces.
+
+Example usage:
+```
+// Define a message with an enum
+message EnumContainer {
+    field status: enum { OK = 0, ERROR = 1, WARNING = 2 }
+}
+
+// Define a message that references the enum
+message EnumUser {
+    field containerStatus: EnumContainer.status
+}
+
+// Define a message that references the enum and adds additional values
+message ExtendedEnumUser {
+    field extendedStatus: EnumContainer.status + { CRITICAL = 100, UNKNOWN = 101 }
+}
+
+// Define a message in a namespace
+namespace Test {
+    message NamespacedEnum {
+        field level: enum { LOW = 0, MEDIUM = 1, HIGH = 2 }
+    }
+}
+
+// Define a message that references an enum in a namespace
+message NamespacedEnumUser {
+    field testLevel: Test::NamespacedEnum.level
+}
+
+// Define a message that references an enum in a namespace and adds additional values
+message ExtendedNamespacedEnumUser {
+    field extendedLevel: Test::NamespacedEnum.level + { EXTREME = 100, UNKNOWN }
+}
+```
+
+The system validates enum references during parsing and ensures that the referenced enum exists. If the referenced message or enum is not found, an error is generated. When an enum reference is resolved, the enum values from the referenced enum are copied to the field, allowing the field to be used with the same enum values as the original enum.
+
+For extended enum references, the additional enum values are added to the field after copying the values from the referenced enum. If an additional enum value has the same name as a value in the referenced enum, an error is generated. Additional enum values can have explicit values (e.g., `CRITICAL = 100`) or auto-incremented values (e.g., `UNKNOWN` after `CRITICAL = 100` would be 101). If no explicit value is assigned to the first additional enum value, it starts from 1000 to avoid conflicts with the referenced enum values.
 
 - [ ] **Message References**
   ```
   field baseMessage: Base::BaseMessage
   ```
   This would allow fields to reference message types defined in other namespaces. Currently, using a message directly as a field type is not supported and will generate an error. Message inheritance should be used instead to achieve similar functionality.
+
+- [ ] **Enum number check**
+  ```
+  field baseMessage: enum { Zero = 1, Dup = 1 }
+  ```
+  Enums cannot have duplicate values. This will generate an error during parsing. This should included auto generate enum numbers and enum inheritance when implemented.
+
+- [ ] **Non message enum + named enums**
+  ```
+  enum baseEnum { Zero = 1, Two = 2 }
+  ```
+  Define enums seperate from a message, they do not have to be inside a message. This allows enums to be used in multiple messages without duplicating the enum definition. This should included auto generate enum numbers and enum inheritance when implemented. They should be included in the generators as standalone enums
+
+- [ ] **Open Enum**
+  ```
+  open_enum baseEnum { Zero = 1, Two = 2 }
+  enum derivedEnum : baseEnum { Three = 3, Four = 4 }
+  open_enum derivedEnum2 : baseEnum { Three = 3, Four = 4 }
+  ```
+  This allows some enums to be defined as open enums, which can be extended in derived messages. 
+  The derived enum can add additional values and also close the enum if of type enum (stays open if open_enum).
+  A closed enum used a generated strict mode (if it has it, only allowing values specified), 
+  an open mode uses the generators less strict mode (allowing any value).  
+  In c++ terms an enum is 'enum class' whereas open_enum are enums and can be used as int.
+  Options which are internally implemented as enums are always open enums.
+  This should include auto generate enum numbers and enum inheritance when implemented.
 
 - [x] **Enum numbering**
   ```
