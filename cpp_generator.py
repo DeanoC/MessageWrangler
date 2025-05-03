@@ -77,11 +77,7 @@ class BaseCppGenerator:
         namespaced_messages = {}
 
         for message_name, message in model.messages.items():
-            # Skip the "Base" namespace for messages in the base file
-            # This namespace is added by the import statement but shouldn't be in the generated base file
-            if message.namespace == "Base" and message.source_file and os.path.basename(message.source_file).startswith("sh4c_base"):
-                global_messages.append(message.name)
-            elif message.namespace:
+            if message.namespace:
                 if message.namespace not in namespaced_messages:
                     namespaced_messages[message.namespace] = []
                 namespaced_messages[message.namespace].append(message.name)
@@ -279,10 +275,6 @@ class UnrealCppGenerator(BaseCppGenerator):
                             base_name = os.path.splitext(os.path.basename(parent_source))[0]
                             # Store the namespace alias for this include
                             if parent_message.namespace:
-                                # If the namespace is "Base", it's a special case for import aliases
-                                if parent_message.namespace == "Base":
-                                    namespace_aliases["Base"] = f"ue_{base_name}"
-                                else:
                                     namespace_aliases[parent_message.namespace] = f"ue_{base_name}"
 
         # Write include statements
@@ -446,11 +438,7 @@ class UnrealCppGenerator(BaseCppGenerator):
 
         # First, collect all messages and their field enums
         for message_name, message in model.messages.items():
-            # Skip the "Base" namespace for messages in the base file
-            # This namespace is added by the import statement but shouldn't be in the generated base file
-            if message.namespace == "Base" and message.source_file and os.path.basename(message.source_file).startswith("sh4c_base"):
-                global_messages.append(message)
-            elif message.namespace:
+            if message.namespace:
                 if message.namespace not in namespaced_messages:
                     namespaced_messages[message.namespace] = []
                     message_field_enums[message.namespace] = []
@@ -460,10 +448,6 @@ class UnrealCppGenerator(BaseCppGenerator):
 
         # Now, collect all field enums for all messages
         for message_name, message in model.messages.items():
-            # Skip messages in the "Base" namespace for the base file
-            if message.namespace == "Base" and message.source_file and os.path.basename(message.source_file).startswith("sh4c_base"):
-                continue
-
             # Determine the namespace for this message's field enums
             namespace = message.namespace
             if namespace:
@@ -472,17 +456,27 @@ class UnrealCppGenerator(BaseCppGenerator):
                     message_field_enums[namespace] = []
 
                 for field in message.fields:
+                    # Skip fields that reference existing enums
+                    if field.enum_reference:
+                        continue
+
                     if field.field_type == FieldType.ENUM:
+                        # Don't include the namespace in the enum name here, it will be added when writing the enum
                         enum_name = f"{message.name}_{field.name}_Enum"
                         if enum_name not in enums_generated:
                             message_field_enums[namespace].append((message, field, enum_name))
                     elif field.field_type == FieldType.OPTIONS:
+                        # Don't include the namespace in the enum name here, it will be added when writing the enum
                         enum_name = f"{message.name}_{field.name}_Options"
                         if enum_name not in enums_generated:
                             message_field_enums[namespace].append((message, field, enum_name))
             else:
                 # For messages without a namespace, add their field enums to the global scope
                 for field in message.fields:
+                    # Skip fields that reference existing enums
+                    if field.enum_reference:
+                        continue
+
                     if field.field_type == FieldType.ENUM:
                         enum_name = f"{message.name}_{field.name}_Enum"
                         if enum_name not in enums_generated:
@@ -547,6 +541,7 @@ class UnrealCppGenerator(BaseCppGenerator):
 
         # Write enums for namespaced messages
         for namespace_name, messages in namespaced_messages.items():
+
             # Check if we've already written this namespace
             if namespace_name not in namespaced_enums:
                 f.write(f"    namespace {namespace_name} {{\n")
@@ -562,11 +557,16 @@ class UnrealCppGenerator(BaseCppGenerator):
                         # Create a temporary enum object to determine the size
                         temp_enum = Enum(enum_name, field.enum_values)
                         size_bits = temp_enum.get_min_size_bits()
+                        # Don't include the namespace in the enum name when writing it, as it's already in a namespace block
                         f.write(f"        enum class {enum_name} : uint{size_bits}\n")
                         f.write("        {\n")
                         for enum_value in field.enum_values:
                             f.write(f"            {enum_value.name} = {enum_value.value},\n")
                         f.write("        };\n\n")
+                        # Add the enum to the set of generated enums, including the namespace
+                        # This ensures we don't generate it again outside the namespace
+                        enums_generated.add(f"{namespace_name}::{enum_name}")
+                        # Also add without namespace to avoid duplicates within the namespace
                         enums_generated.add(enum_name)
                     elif field.field_type == FieldType.OPTIONS:
                         f.write(f"        // Options for {message.name}.{field.name}\n")
@@ -576,6 +576,10 @@ class UnrealCppGenerator(BaseCppGenerator):
                         for enum_value in field.enum_values:
                             f.write(f"            {enum_value.name} = {enum_value.value},\n")
                         f.write("        };\n\n")
+                        # Add the enum to the set of generated enums, including the namespace
+                        # This ensures we don't generate it again outside the namespace
+                        enums_generated.add(f"{namespace_name}::{enum_name}")
+                        # Also add without namespace to avoid duplicates within the namespace
                         enums_generated.add(enum_name)
 
             # Only close the namespace if we opened it
@@ -698,11 +702,7 @@ class UnrealCppGenerator(BaseCppGenerator):
         namespaced_messages = {}
 
         for message_name, message in model.messages.items():
-            # Skip the "Base" namespace for messages in the base file
-            # This namespace is added by the import statement but shouldn't be in the generated base file
-            if message.namespace == "Base" and message.source_file and os.path.basename(message.source_file).startswith("sh4c_base"):
-                global_messages.append(message)
-            elif message.namespace:
+            if message.namespace:
                 if message.namespace not in namespaced_messages:
                     namespaced_messages[message.namespace] = []
                 namespaced_messages[message.namespace].append(message)
@@ -987,24 +987,56 @@ class UnrealCppGenerator(BaseCppGenerator):
             f.write(f"{indent}/** {field_type_desc} field */\n")
 
         if field.field_type == FieldType.ENUM:
-            # If the message is in a namespace, use the namespace in the enum name
-            if "::" in message_name:
-                namespace, msg_name = message_name.split("::", 1)
-                enum_name = f"{msg_name}_{field.name}_Enum"
-            else:
-                enum_name = f"{message_name}_{field.name}_Enum"
+            # Check if this field references an existing enum
+            if field.enum_reference:
+                # Parse the enum reference to get the enum name
+                if '.' in field.enum_reference:
+                    # Format is MessageName.EnumName or Namespace::MessageName.EnumName
+                    ref_parts = field.enum_reference.split('.')
+                    ref_message = ref_parts[0]
+                    ref_field = ref_parts[1]
 
-            # Add default value if specified
-            if field.default_value is not None:
-                f.write(f"{indent}{enum_name} {field.name} = {enum_name}::{field.default_value};\n")
+                    # Check if the reference is to a message in a namespace
+                    if "::" in ref_message:
+                        # This is a reference to a message in a namespace
+                        namespace, msg_name = ref_message.split("::", 1)
+                        # For ClientCommands::Command enum, use the namespace directly
+                        if ref_field == "type" and msg_name == "Command":
+                            enum_type = f"{namespace}::{msg_name}"
+                        else:
+                            # For other message field enums, use the standard naming convention
+                            enum_type = f"{namespace}::{msg_name}_{ref_field}_Enum"
+                    else:
+                        # This is a reference to a message without a namespace
+                        enum_type = f"{ref_message}_{ref_field}_Enum"
+                else:
+                    # Direct reference to an enum
+                    enum_type = field.enum_reference
+
+                # Add default value if specified
+                if field.default_value is not None:
+                    f.write(f"{indent}{enum_type} {field.name} = {enum_type}::{field.default_value};\n")
+                else:
+                    f.write(f"{indent}{enum_type} {field.name};\n")
             else:
-                f.write(f"{indent}{enum_name} {field.name};\n")
+                # If the message is in a namespace, use the namespace in the enum name
+                if "::" in message_name:
+                    namespace, msg_name = message_name.split("::", 1)
+                    enum_name = f"{namespace}::{msg_name}_{field.name}_Enum"
+                else:
+                    enum_name = f"{message_name}_{field.name}_Enum"
+
+                # Add default value if specified
+                if field.default_value is not None:
+                    f.write(f"{indent}{enum_name} {field.name} = {enum_name}::{field.default_value};\n")
+                else:
+                    f.write(f"{indent}{enum_name} {field.name};\n")
 
         elif field.field_type == FieldType.OPTIONS:
             # If the message is in a namespace, use the namespace in the enum name
             if "::" in message_name:
                 namespace, msg_name = message_name.split("::", 1)
-                enum_name = f"{msg_name}_{field.name}_Options"
+                enum_name = f"{namespace}::{msg_name}_{field.name}_Options"
             else:
                 enum_name = f"{message_name}_{field.name}_Options"
 
@@ -1138,7 +1170,7 @@ class UnrealCppGenerator(BaseCppGenerator):
             # If the message is in a namespace, use the namespace in the enum name
             if "::" in message_name:
                 namespace, msg_name = message_name.split("::", 1)
-                enum_name = f"{msg_name}_{field.name}_Enum"
+                enum_name = f"{namespace}::{msg_name}_{field.name}_Enum"
             else:
                 enum_name = f"{message_name}_{field.name}_Enum"
             f.write(f"{indent}int32 {field.name}Value;\n")
@@ -1161,7 +1193,7 @@ class UnrealCppGenerator(BaseCppGenerator):
             # If the message is in a namespace, use the namespace in the enum name
             if "::" in message_name:
                 namespace, msg_name = message_name.split("::", 1)
-                enum_name = f"{msg_name}_{field.name}_Options"
+                enum_name = f"{namespace}::{msg_name}_{field.name}_Options"
             else:
                 enum_name = f"{message_name}_{field.name}_Options"
             f.write(f"{indent}uint32 {field.name}Value;\n")
@@ -1487,11 +1519,7 @@ class StandardCppGenerator(BaseCppGenerator):
                             base_name = os.path.splitext(os.path.basename(parent_source))[0]
                             # Store the namespace alias for this include
                             if parent_message.namespace:
-                                # If the namespace is "Base", it's a special case for import aliases
-                                if parent_message.namespace == "Base":
-                                    namespace_aliases["Base"] = f"c_{base_name}"
-                                else:
-                                    namespace_aliases[parent_message.namespace] = f"c_{base_name}"
+                                namespace_aliases[parent_message.namespace] = f"c_{base_name}"
 
         # Write include statements
         for header in sorted(needed_includes):
@@ -1636,11 +1664,7 @@ class StandardCppGenerator(BaseCppGenerator):
         namespaced_messages = {}
 
         for message_name, message in model.messages.items():
-            # Skip the "Base" namespace for messages in the base file
-            # This namespace is added by the import statement but shouldn't be in the generated base file
-            if message.namespace == "Base" and message.source_file and os.path.basename(message.source_file).startswith("sh4c_base"):
-                global_messages.append(message)
-            elif message.namespace:
+            if message.namespace:
                 if message.namespace not in namespaced_messages:
                     namespaced_messages[message.namespace] = []
                 namespaced_messages[message.namespace].append(message)
@@ -1677,6 +1701,7 @@ class StandardCppGenerator(BaseCppGenerator):
 
         # Write enums for namespaced messages
         for namespace_name, messages in namespaced_messages.items():
+
             # Check if we've already written this namespace
             if namespace_name not in namespaced_enums:
                 f.write(f"    namespace {namespace_name} {{\n")
@@ -1731,11 +1756,7 @@ class StandardCppGenerator(BaseCppGenerator):
         namespaced_messages = {}
 
         for message_name, message in model.messages.items():
-            # Skip the "Base" namespace for messages in the base file
-            # This namespace is added by the import statement but shouldn't be in the generated base file
-            if message.namespace == "Base" and message.source_file and os.path.basename(message.source_file).startswith("sh4c_base"):
-                global_messages.append(message)
-            elif message.namespace:
+            if message.namespace:
                 if message.namespace not in namespaced_messages:
                     namespaced_messages[message.namespace] = []
                 namespaced_messages[message.namespace].append(message)
@@ -1912,7 +1933,7 @@ class StandardCppGenerator(BaseCppGenerator):
                     break
 
             # If the message is in a namespace, use the namespace in the enum name
-            if message and message.namespace and message.namespace != "Base":
+            if message and message.namespace:
                 namespace_prefix = f"{message.namespace}::"
                 enum_name = f"{message_name}_{field.name}_Enum"
                 full_enum_name = f"{namespace_prefix}{enum_name}"
@@ -1935,7 +1956,7 @@ class StandardCppGenerator(BaseCppGenerator):
                     break
 
             # If the message is in a namespace, use the namespace in the enum name
-            if message and message.namespace and message.namespace != "Base":
+            if message and message.namespace:
                 namespace_prefix = f"{message.namespace}::"
                 enum_name = f"{message_name}_{field.name}_Options"
                 full_enum_name = f"{namespace_prefix}{enum_name}"
