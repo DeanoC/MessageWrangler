@@ -14,7 +14,8 @@ from message_model import (
     Field,
     Message,
     MessageModel,
-    Namespace
+    Namespace,
+    Enum
 )
 
 
@@ -93,6 +94,12 @@ class MessageParser:
             field_name = ""
             field_type_def = ""
             field_start_line = 0
+
+            # Variables to track multi-line enum parsing
+            in_enum_def = False
+            current_enum = None
+            enum_values_str = ""
+            enum_start_line = 0
 
             while i < len(lines):
                 line = lines[i].strip()
@@ -231,6 +238,30 @@ class MessageParser:
                             self._process_field(current_message, field_name, field_type_def, current_comment, field_start_line)
                             current_comment = ""
                             in_field_def = False
+
+                    i += 1
+                    continue
+
+                # If we're in the middle of parsing an enum definition
+                elif in_enum_def:
+                    enum_values_str += " " + line
+
+                    # Check if this line completes the enum definition
+                    if '}' in line:
+                        # Get everything up to the closing brace
+                        enum_values_str = enum_values_str[:enum_values_str.rfind('}')].strip()
+
+                        # Parse enum values
+                        if enum_values_str:
+                            current_enum.values = self._parse_enum_values(enum_values_str, enum_start_line)
+
+                        # Add the enum to the model
+                        self.model.add_enum(current_enum)
+
+                        # Reset enum parsing state
+                        in_enum_def = False
+                        current_enum = None
+                        enum_values_str = ""
 
                     i += 1
                     continue
@@ -411,11 +442,44 @@ class MessageParser:
                     # If there's a comment that wasn't used, discard it
                     current_comment = ""
 
+                # Parse standalone enum definition
+                elif line.startswith('enum ') or line.startswith('open_enum '):
+                    is_open = line.startswith('open_enum ')
+
+                    # Parse the enum definition
+                    enum = self._parse_standalone_enum(line, is_open, i+1, current_namespace, current_comment)
+                    if enum:
+                        # Check if this is a complete enum definition or spans multiple lines
+                        if '{' in line:
+                            # This is a multi-line enum definition
+                            # We need to parse the enum values
+                            if '{' in line and '}' in line:
+                                # Get everything between the first { and the last }
+                                enum_values_str = line[line.find('{')+1:line.rfind('}')].strip()
+                                if enum_values_str:
+                                    # Parse enum values
+                                    enum.values = self._parse_enum_values(enum_values_str, i+1)
+                                # Add the enum to the model
+                                self.model.add_enum(enum)
+                            else:
+                                # Start multi-line enum parsing
+                                in_enum_def = True
+                                current_enum = enum
+                                enum_values_str = line[line.find('{')+1:].strip()
+                                enum_start_line = i+1
+                        else:
+                            # This is a single-line enum definition with no values
+                            # Add the enum to the model
+                            self.model.add_enum(enum)
+
+                    # Reset comment for next use
+                    current_comment = ""
+
                 # Any other line that's not empty or a comment is an error
                 else:
                     # Check if the line contains any non-whitespace characters
                     if line.strip():
-                        self.errors.append(f"Line {i+1}: Invalid syntax: '{line}'. Expected 'message', 'namespace', 'field', or a closing brace.")
+                        self.errors.append(f"Line {i+1}: Invalid syntax: '{line}'. Expected 'message', 'namespace', 'field', 'enum', 'open_enum', or a closing brace.")
                     current_comment = ""
 
                 i += 1
@@ -446,6 +510,87 @@ class MessageParser:
             print(error_msg)
             return None
 
+    def _parse_enum_values(self, enum_str: str, line_number: int = 0) -> List[EnumValue]:
+        """
+        Parse enum values from a string.
+
+        Args:
+            enum_str: The string containing enum values
+            line_number: The line number where the enum is defined (default: 0)
+
+        Returns:
+            A list of parsed EnumValue objects
+        """
+        enum_values_list = []
+
+        # Process each line to remove comments
+        processed_lines = []
+        for line in enum_str.split('\n'):
+            # Remove comments (anything after //)
+            if '//' in line:
+                line = line[:line.find('//')]
+            processed_lines.append(line.strip())
+
+        # Join the processed lines
+        enum_str = ' '.join(processed_lines)
+
+        # If there are commas, split by commas
+        if ',' in enum_str:
+            enum_values = []
+            for v in enum_str.split(','):
+                v = v.strip()
+                if v:  # Skip empty values
+                    enum_values.append(v)
+        # If there are no commas, treat the entire string as a single value
+        else:
+            enum_values = [enum_str.strip()]
+
+        # Debug print
+        self.debug_print(f"DEBUG: Enum values: {enum_values}")
+
+        # Create EnumValue objects with support for explicit value assignments
+        current_value = 0  # Default starting value
+        for value_def in enum_values:
+            if value_def:  # Skip empty values
+                # Check if this enum value has an explicit assignment
+                explicitly_set = False
+                if '=' in value_def:
+                    # Split at the equals sign
+                    name_part, value_part = value_def.split('=', 1)
+                    value_name = name_part.strip()
+
+                    # Parse the value part as an integer
+                    try:
+                        value_part = value_part.strip()
+                        current_value = int(value_part)
+                        explicitly_set = True
+                    except ValueError:
+                        self.errors.append(f"Line {line_number}: Invalid enum value '{value_part}' for '{value_name}'. Must be an integer.")
+                        continue
+                else:
+                    # No explicit assignment, use the current value
+                    value_name = value_def.strip()
+
+                # Check if enum value name is a reserved keyword
+                if self._is_reserved_keyword(value_name):
+                    self.errors.append(f"Line {line_number}: Enum value '{value_name}' is a reserved keyword and cannot be used.")
+                else:
+                    # Check for duplicate enum values
+                    for existing_value in enum_values_list:
+                        if existing_value.value == current_value:
+                            self.errors.append(f"Line {line_number}: Duplicate enum value {current_value} for '{value_name}'. Enum values must be unique.")
+                            break
+                    else:  # No duplicate found
+                        enum_value = EnumValue(name=value_name, value=current_value)
+                        # Store whether this value was explicitly set
+                        if explicitly_set:
+                            enum_value.explicitly_set = True
+                        enum_values_list.append(enum_value)
+                        # Increment the current value for the next enum value
+                        current_value += 1
+
+        return enum_values_list
+
     def _parse_enum_field(self, name: str, type_def: str, line_number: int = 0) -> Optional[Field]:
         """
         Parse an enum field definition.
@@ -470,65 +615,93 @@ class MessageParser:
                 # Get everything between the first { and the last }
                 enum_str = type_def[type_def.find('{')+1:type_def.rfind('}')].strip()
 
-                # Process each line to remove comments
-                processed_lines = []
-                for line in enum_str.split('\n'):
-                    # Remove comments (anything after //)
-                    if '//' in line:
-                        line = line[:line.find('//')]
-                    processed_lines.append(line.strip())
-
-                # Join the processed lines
-                enum_str = ' '.join(processed_lines)
-
-                # If there are commas, split by commas
-                if ',' in enum_str:
-                    enum_values = []
-                    for v in enum_str.split(','):
-                        v = v.strip()
-                        if v:  # Skip empty values
-                            enum_values.append(v)
-                # If there are no commas, treat the entire string as a single value
-                else:
-                    enum_values = [enum_str.strip()]
-
-                # Debug print
-                self.debug_print(f"DEBUG: Enum values: {enum_values}")
-
-                # Create EnumValue objects with support for explicit value assignments
-                current_value = 0  # Default starting value
-                for value_def in enum_values:
-                    if value_def:  # Skip empty values
-                        # Check if this enum value has an explicit assignment
-                        if '=' in value_def:
-                            # Split at the equals sign
-                            name_part, value_part = value_def.split('=', 1)
-                            value_name = name_part.strip()
-
-                            # Parse the value part as an integer
-                            try:
-                                value_part = value_part.strip()
-                                current_value = int(value_part)
-                            except ValueError:
-                                self.errors.append(f"Line {line_number}: Invalid enum value '{value_part}' for '{value_name}'. Must be an integer.")
-                                continue
-                        else:
-                            # No explicit assignment, use the current value
-                            value_name = value_def.strip()
-
-                        # Check if enum value name is a reserved keyword
-                        if self._is_reserved_keyword(value_name):
-                            self.errors.append(f"Line {line_number}: Enum value '{value_name}' is a reserved keyword and cannot be used.")
-                        else:
-                            enum_value = EnumValue(name=value_name, value=current_value)
-                            field.enum_values.append(enum_value)
-                            # Increment the current value for the next enum value
-                            current_value += 1
+                # Parse enum values
+                field.enum_values = self._parse_enum_values(enum_str, line_number)
 
             return field
 
         except Exception as e:
             error_msg = f"Line {line_number}: Error parsing enum field '{name}': {str(e)}"
+            self.errors.append(error_msg)
+            return None
+
+    def _parse_standalone_enum(self, line: str, is_open: bool, line_number: int = 0, current_namespace: Optional[Namespace] = None, current_comment: str = "") -> Optional[Enum]:
+        """
+        Parse a standalone enum definition.
+
+        Args:
+            line: The line containing the enum definition
+            is_open: Whether the enum is an open enum
+            line_number: The line number where the enum is defined (default: 0)
+            current_namespace: The current namespace context (default: None)
+            current_comment: The current comment context (default: "")
+
+        Returns:
+            The parsed enum, or None if parsing failed
+        """
+        try:
+            # Extract enum name and parent if exists
+            if is_open:
+                enum_def = line[len('open_enum '):].strip()
+            else:
+                enum_def = line[len('enum '):].strip()
+
+            # Handle the case where the enum definition is on a single line
+            if enum_def.endswith('{}'):
+                enum_def = enum_def[:-2].strip()
+            elif '{' in enum_def:
+                enum_def = enum_def[:enum_def.find('{')].strip()
+
+            # Check for inheritance
+            parent_enum = None
+            if ':' in enum_def:
+                # Split at the first colon that's not part of a namespace separator (::)
+                colon_pos = enum_def.find(':')
+                # Check if this is a namespace separator (::)
+                if colon_pos + 1 < len(enum_def) and enum_def[colon_pos + 1] == ':':
+                    # Find the next colon that's not part of a namespace separator
+                    colon_pos = enum_def.find(':', colon_pos + 2)
+                    if colon_pos == -1:
+                        # No inheritance colon found, treat the whole thing as the enum name
+                        enum_name = enum_def.strip()
+                    else:
+                        enum_name = enum_def[:colon_pos].strip()
+                        parent_enum = enum_def[colon_pos + 1:].strip()
+                else:
+                    # Regular inheritance colon
+                    enum_name = enum_def[:colon_pos].strip()
+                    parent_enum = enum_def[colon_pos + 1:].strip()
+            else:
+                enum_name = enum_def
+
+            # Check if enum name is a reserved keyword
+            if self._is_reserved_keyword(enum_name):
+                self.errors.append(f"Line {line_number}: Enum name '{enum_name}' is a reserved keyword and cannot be used.")
+                return None
+
+            # Check if an enum with the same name already exists in the same namespace
+            namespace_name = current_namespace.name if current_namespace else None
+            full_name = f"{namespace_name}::{enum_name}" if namespace_name else enum_name
+            if self.model.get_enum(full_name):
+                self.errors.append(f"Line {line_number}: Duplicate enum definition '{full_name}'. An enum with the same name already exists in this namespace.")
+                return None
+
+            # Create a new enum with empty values for now
+            enum = Enum(
+                name=enum_name,
+                values=[],
+                parent=parent_enum,
+                namespace=namespace_name,
+                description=f"{enum_name} enum",
+                comment=current_comment,
+                source_file=self.input_file,
+                is_open=is_open
+            )
+
+            return enum
+
+        except Exception as e:
+            error_msg = f"Line {line_number}: Error parsing enum '{line}': {str(e)}"
             self.errors.append(error_msg)
             return None
 
@@ -834,10 +1007,16 @@ class MessageParser:
                         if self._is_reserved_keyword(value_name):
                             self.errors.append(f"Line {line_number}: Enum value '{value_name}' is a reserved keyword and cannot be used.")
                         else:
-                            enum_value = EnumValue(name=value_name, value=current_value)
-                            field.additional_enum_values.append(enum_value)
-                            # Increment the current value for the next enum value
-                            current_value += 1
+                            # Check for duplicate enum values
+                            for existing_value in field.additional_enum_values:
+                                if existing_value.value == current_value:
+                                    self.errors.append(f"Line {line_number}: Duplicate enum value {current_value} for '{value_name}'. Enum values must be unique.")
+                                    break
+                            else:  # No duplicate found
+                                enum_value = EnumValue(name=value_name, value=current_value)
+                                field.additional_enum_values.append(enum_value)
+                                # Increment the current value for the next enum value
+                                current_value += 1
 
                 self.debug_print(f"DEBUG: Added {len(field.additional_enum_values)} additional enum values to field '{name}'")
 
@@ -982,10 +1161,16 @@ class MessageParser:
                                 if self._is_reserved_keyword(value_name):
                                     self.errors.append(f"Line {line_number}: Enum value '{value_name}' is a reserved keyword and cannot be used.")
                                 else:
-                                    enum_value = EnumValue(name=value_name, value=current_value)
-                                    field.additional_enum_values.append(enum_value)
-                                    # Increment the current value for the next enum value
-                                    current_value += 1
+                                    # Check for duplicate enum values
+                                    for existing_value in field.additional_enum_values:
+                                        if existing_value.value == current_value:
+                                            self.errors.append(f"Line {line_number}: Duplicate enum value {current_value} for '{value_name}'. Enum values must be unique.")
+                                            break
+                                    else:  # No duplicate found
+                                        enum_value = EnumValue(name=value_name, value=current_value)
+                                        field.additional_enum_values.append(enum_value)
+                                        # Increment the current value for the next enum value
+                                        current_value += 1
 
                         self.debug_print(f"DEBUG: Added {len(field.additional_enum_values)} additional enum values to field '{name}'")
 
@@ -1205,18 +1390,81 @@ class MessageParser:
 
                         # Add any additional enum values
                         if field.additional_enum_values:
-                            # Check for duplicate enum value names
+                            # Check for duplicate enum value names and values
                             existing_names = {ev.name for ev in field.enum_values}
+                            existing_values = {ev.value for ev in field.enum_values}
                             for additional_value in field.additional_enum_values:
                                 if additional_value.name in existing_names:
                                     self.errors.append(f"Error: Duplicate enum value name '{additional_value.name}' in extended enum reference '{field.enum_reference}' in field '{field.name}' of message '{message_name}'.")
+                                elif additional_value.value in existing_values:
+                                    self.errors.append(f"Error: Duplicate enum value {additional_value.value} for '{additional_value.name}' in extended enum reference '{field.enum_reference}' in field '{field.name}' of message '{message_name}'. Enum values must be unique.")
                                 else:
                                     field.enum_values.append(additional_value)
                                     existing_names.add(additional_value.name)
+                                    existing_values.add(additional_value.value)
 
                             self.debug_print(f"DEBUG: Added {len(field.additional_enum_values)} additional enum values to field '{field.name}' in message '{message_name}'.")
                     else:
                         self.errors.append(f"Error: Invalid enum reference format '{field.enum_reference}' in field '{field.name}' of message '{message_name}'. Expected format is 'MessageName.EnumName' or 'Namespace::MessageName.EnumName'.")
+
+        # Check all standalone enums for parent references
+        for enum_name, enum in list(self.model.enums.items()):  # Use list() to avoid modification during iteration
+            if enum.parent:
+                # Check if the parent reference contains "+ enum" syntax
+                if " + enum" in enum.parent:
+                    # Split the parent reference into the actual parent enum reference and the "+ enum" part
+                    parent_ref = enum.parent.split(" + enum")[0].strip()
+
+                    # Check if the parent reference is a field in a message (e.g., Base::Command.type)
+                    if '.' in parent_ref:
+                        message_ref, field_name = parent_ref.rsplit('.', 1)
+
+                        # Get the referenced message
+                        referenced_message = self.model.get_message(message_ref)
+                        if not referenced_message:
+                            self.errors.append(f"Error: Message '{message_ref}' referenced by enum inheritance '{parent_ref}' in enum '{enum_name}' not found.")
+                            continue
+
+                        # Find the enum field in the referenced message
+                        parent_field = None
+                        for ref_field in referenced_message.fields:
+                            if ref_field.name == field_name and ref_field.field_type == FieldType.ENUM:
+                                parent_field = ref_field
+                                break
+
+                        if not parent_field:
+                            self.errors.append(f"Error: Enum field '{field_name}' not found in message '{message_ref}' referenced by enum inheritance '{parent_ref}' in enum '{enum_name}'.")
+                            continue
+
+                        # Copy the enum values from the parent field
+                        parent_values = parent_field.enum_values.copy()
+
+                        # Get the highest value from the parent enum
+                        highest_value = max(v.value for v in parent_values) if parent_values else -1
+
+                        # Update the values in the child enum to start after the highest value in the parent enum
+                        # Only update values that haven't been explicitly set
+                        current_value = highest_value + 1
+                        for value in enum.values:
+                            # Check if this value was explicitly set in the original definition
+                            # If it was, keep the original value
+                            # If not, assign the next available value
+                            if hasattr(value, 'explicitly_set') and value.explicitly_set:
+                                current_value = value.value + 1
+                            else:
+                                value.value = current_value
+                                current_value += 1
+
+                        # Prepend the parent values to the child enum's values
+                        enum.values = parent_values + enum.values
+
+                        self.debug_print(f"DEBUG: Added {len(parent_values)} parent enum values to enum '{enum_name}' from '{parent_ref}'.")
+                    else:
+                        self.errors.append(f"Error: Invalid enum inheritance format '{parent_ref}' in enum '{enum_name}'. Expected format is 'MessageName.EnumName' or 'Namespace::MessageName.EnumName'.")
+
+                # Update the parent reference to remove the "+ enum" part
+                if " + enum" in enum.parent:
+                    enum.parent = enum.parent.split(" + enum")[0].strip()
 
         # Don't convert warnings about unresolved parents to errors
         # This allows messages with parent references to imported messages to be included in the model

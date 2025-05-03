@@ -152,6 +152,84 @@ class Message:
         return self.name
 
 
+class Enum:
+    """Represents a standalone enum definition."""
+
+    def __init__(self, name: str, values: List[EnumValue], parent: Optional[str] = None, namespace: Optional[str] = None, description: str = "", comment: str = "", source_file: Optional[str] = None, is_open: bool = False):
+        """
+        Initialize a standalone enum.
+
+        Args:
+            name: The name of the enum
+            values: The list of enum values
+            parent: Optional parent enum name (for inheritance)
+            namespace: Optional namespace name
+            description: Optional description of the enum
+            comment: Optional user-supplied comment for the enum
+            source_file: Optional source file path where the enum was defined
+            is_open: Whether the enum is an open enum
+        """
+        self.name = name
+        self.values = values
+        self.parent = parent
+        self.namespace = namespace
+        self.description = description
+        self.comment = comment
+        self.source_file = source_file
+        self.is_open = is_open
+        self._min_size_bits = None
+
+    def get_full_name(self) -> str:
+        """
+        Get the fully qualified name of the enum, including namespace.
+
+        Returns:
+            The fully qualified name of the enum
+        """
+        if self.namespace:
+            return f"{self.namespace}::{self.name}"
+        return self.name
+
+    def get_min_size_bits(self) -> int:
+        """
+        Get the minimum number of bits needed to represent all values in the enum.
+
+        For closed enums, this is the smallest power of 2 that can hold the maximum value.
+        For open enums, this defaults to 32 bits unless a value exceeds that range, then it uses 64 bits.
+
+        Returns:
+            The minimum number of bits (8, 16, 32, or 64)
+        """
+        if self._min_size_bits is not None:
+            return self._min_size_bits
+
+        # Find the maximum value in the enum
+        max_value = 0
+        for value in self.values:
+            if value.value > max_value:
+                max_value = value.value
+
+        # For open enums, default to 32 bits unless a value exceeds that range
+        if self.is_open:
+            if max_value > 0xFFFFFFFF:  # 2^32 - 1
+                self._min_size_bits = 64
+            else:
+                self._min_size_bits = 32
+            return self._min_size_bits
+
+        # For closed enums, find the smallest power of 2 that can hold the maximum value
+        if max_value <= 0xFF:  # 2^8 - 1
+            self._min_size_bits = 8
+        elif max_value <= 0xFFFF:  # 2^16 - 1
+            self._min_size_bits = 16
+        elif max_value <= 0xFFFFFFFF:  # 2^32 - 1
+            self._min_size_bits = 32
+        else:
+            self._min_size_bits = 64
+
+        return self._min_size_bits
+
+
 class MessageModel:
     """
     Represents the complete model of all message definitions.
@@ -163,6 +241,7 @@ class MessageModel:
         """Initialize an empty message model."""
         self.messages: Dict[str, Message] = {}
         self.namespaces: Dict[str, Namespace] = {}
+        self.enums: Dict[str, Enum] = {}
 
     def add_message(self, message: Message) -> None:
         """
@@ -225,3 +304,43 @@ class MessageModel:
             The namespace, or None if not found
         """
         return self.namespaces.get(name)
+
+    def add_enum(self, enum: Enum) -> None:
+        """
+        Add an enum to the model.
+
+        Args:
+            enum: The enum to add
+        """
+        # Add to global enums dictionary
+        self.enums[enum.get_full_name()] = enum
+
+        # If enum has a namespace, add it to the namespace
+        if enum.namespace and enum.namespace in self.namespaces:
+            if not hasattr(self.namespaces[enum.namespace], 'enums'):
+                self.namespaces[enum.namespace].enums = {}
+            self.namespaces[enum.namespace].enums[enum.name] = enum
+
+    def get_enum(self, name: str) -> Optional[Enum]:
+        """
+        Get an enum by name.
+
+        Args:
+            name: The name of the enum to get (can be fully qualified or not)
+
+        Returns:
+            The enum, or None if not found
+        """
+        # First try to get the enum directly (assuming it's a fully qualified name)
+        enum = self.enums.get(name)
+        if enum:
+            return enum
+
+        # If not found, try to parse as namespace::enum
+        if '::' in name:
+            namespace_name, enum_name = name.split('::', 1)
+            namespace = self.namespaces.get(namespace_name)
+            if namespace and hasattr(namespace, 'enums'):
+                return namespace.enums.get(enum_name)
+
+        return None

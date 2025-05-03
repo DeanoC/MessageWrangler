@@ -4,16 +4,20 @@ Python Generator
 This module provides functionality for generating Python code from the
 intermediate representation defined in message_model.py.
 It generates Python 3 code with classes for each message type.
+It should NEVER have any specific code to handle troublesome cases.
+
 """
 
 import os
 from typing import TextIO
+from enum import Enum, IntEnum, IntFlag
 
 from message_model import (
     FieldType,
     Field,
     Message,
-    MessageModel
+    MessageModel,
+    Enum as ModelEnum
 )
 
 
@@ -107,6 +111,10 @@ class PythonGenerator:
                 filtered_model = MessageModel()
                 for message in messages:
                     filtered_model.add_message(message)
+
+                # Add standalone enums to the filtered model
+                for enum_name, enum in self.model.enums.items():
+                    filtered_model.add_enum(enum)
 
                 # Generate the Python file
                 with open(py_file, 'w') as f:
@@ -293,6 +301,27 @@ class PythonGenerator:
 
         enums_generated = set()
 
+        # Write standalone enums
+        for enum_name, enum in model.enums.items():
+            py_enum_name_part = enum_name.replace("::", "_")
+            # Create CapWords version for class name
+            py_enum_name = self._to_cap_words(py_enum_name_part)
+            if py_enum_name_part not in enums_generated:
+                if enum.is_open:
+                    f.write(f"class {py_enum_name}(IntEnum):\n")
+                else:
+                    f.write(f"class {py_enum_name}(Enum):\n")
+                f.write(f"    \"\"\"Standalone enum {enum_name}\"\"\"\n")
+                if enum.comment:
+                    comment_lines = enum.comment.split('\n')
+                    for line in comment_lines:
+                        f.write(f"    # {line}\n")
+                for enum_value in enum.values:
+                    f.write(f"    {enum_value.name} = {enum_value.value}\n")
+                f.write("\n")
+                enums_generated.add(py_enum_name_part)
+
+        # Write enums for message fields
         for message_name, message in model.messages.items():
             py_message_name_part = message_name.replace("::", "_")
             for field in message.fields:

@@ -4,6 +4,7 @@ C++ Generator
 This module provides functionality for generating C++ code from the
 intermediate representation defined in message_model.py.
 It supports both Unreal Engine C++ and standard C++ code generation.
+It should NEVER have any specific code to handle troublesome cases.
 """
 
 import os
@@ -13,7 +14,8 @@ from message_model import (
     FieldType,
     Field,
     Message,
-    MessageModel
+    MessageModel,
+    Enum
 )
 
 
@@ -125,7 +127,7 @@ class UnrealCppGenerator(BaseCppGenerator):
             output_base_name: Optional base name to use for the namespace (defaults to self.output_name)
         """
         namespace_name = output_base_name if output_base_name else self.output_name
-        f.write(f"namespace ue_{namespace_name} {{\n\n")
+        f.write(f"namespace ue_{namespace_name} {{\n")
 
     def _write_namespace_end(self, f: TextIO, output_base_name=None) -> None:
         """
@@ -195,6 +197,11 @@ class UnrealCppGenerator(BaseCppGenerator):
                 for message in messages:
                     filtered_model.add_message(message)
 
+                # Add standalone enums to the filtered model, but only from the current file
+                for enum_name, enum in self.model.enums.items():
+                    if enum.source_file == source_file:
+                        filtered_model.add_enum(enum)
+
                 # Generate the header file
                 with open(header_file, 'w') as f:
                     self._write_header(f)
@@ -203,7 +210,10 @@ class UnrealCppGenerator(BaseCppGenerator):
                     self._write_file_includes(f, messages, messages_by_source, generated_files)
 
                     self._write_namespace_start(f, output_base_name)
+                    f.write("\n")  # Add a newline after the namespace declaration
+
                     self._write_enums(f, filtered_model)
+
                     self._write_forward_declarations(f, filtered_model)
                     self._write_structs(f, filtered_model)
 
@@ -380,10 +390,61 @@ class UnrealCppGenerator(BaseCppGenerator):
 
         enums_generated = set()
 
+        # Group standalone enums by namespace
+        global_enums = []
+        namespaced_enums = {}
+
+        for enum_name, enum in model.enums.items():
+            if enum.namespace:
+                if enum.namespace not in namespaced_enums:
+                    namespaced_enums[enum.namespace] = []
+                namespaced_enums[enum.namespace].append(enum)
+            else:
+                global_enums.append(enum)
+
+        # Write standalone enums for global scope
+        for enum in global_enums:
+            if enum.name not in enums_generated:
+                f.write(f"    // Standalone enum {enum.name}\n")
+                # Determine the appropriate size for the enum
+                size_bits = enum.get_min_size_bits()
+                if enum.is_open:
+                    f.write(f"    enum {enum.name} : uint{size_bits}\n")
+                else:
+                    f.write(f"    enum class {enum.name} : uint{size_bits}\n")
+                f.write("    {\n")
+                for enum_value in enum.values:
+                    f.write(f"        {enum_value.name} = {enum_value.value},\n")
+                f.write("    };\n\n")
+                enums_generated.add(enum.name)
+
+        # Write standalone enums for namespaced scope
+        for namespace_name, enums in namespaced_enums.items():
+            f.write(f"    namespace {namespace_name} {{\n")
+            for enum in enums:
+                if enum.name not in enums_generated:
+                    f.write(f"        // Standalone enum {enum.name}\n")
+                    # Determine the appropriate size for the enum
+                    size_bits = enum.get_min_size_bits()
+                    if enum.is_open:
+                        f.write(f"        enum {enum.name} : uint{size_bits}\n")
+                    else:
+                        f.write(f"        enum class {enum.name} : uint{size_bits}\n")
+                    f.write("        {\n")
+                    for enum_value in enum.values:
+                        f.write(f"            {enum_value.name} = {enum_value.value},\n")
+                    f.write("        };\n\n")
+                    enums_generated.add(enum.name)
+            f.write(f"    }} // namespace {namespace_name}\n\n")
+
         # Group messages by namespace
         global_messages = []
+        global_message_field_enums = []  # Separate list for global message field enums
         namespaced_messages = {}
+        # Also track message field enums by namespace
+        message_field_enums = {}
 
+        # First, collect all messages and their field enums
         for message_name, message in model.messages.items():
             # Skip the "Base" namespace for messages in the base file
             # This namespace is added by the import statement but shouldn't be in the generated base file
@@ -392,9 +453,44 @@ class UnrealCppGenerator(BaseCppGenerator):
             elif message.namespace:
                 if message.namespace not in namespaced_messages:
                     namespaced_messages[message.namespace] = []
+                    message_field_enums[message.namespace] = []
                 namespaced_messages[message.namespace].append(message)
             else:
                 global_messages.append(message)
+
+        # Now, collect all field enums for all messages
+        for message_name, message in model.messages.items():
+            # Skip messages in the "Base" namespace for the base file
+            if message.namespace == "Base" and message.source_file and os.path.basename(message.source_file).startswith("sh4c_base"):
+                continue
+
+            # Determine the namespace for this message's field enums
+            namespace = message.namespace
+            if namespace:
+                # For messages with a namespace, add their field enums to that namespace
+                if namespace not in message_field_enums:
+                    message_field_enums[namespace] = []
+
+                for field in message.fields:
+                    if field.field_type == FieldType.ENUM:
+                        enum_name = f"{message.name}_{field.name}_Enum"
+                        if enum_name not in enums_generated:
+                            message_field_enums[namespace].append((message, field, enum_name))
+                    elif field.field_type == FieldType.OPTIONS:
+                        enum_name = f"{message.name}_{field.name}_Options"
+                        if enum_name not in enums_generated:
+                            message_field_enums[namespace].append((message, field, enum_name))
+            else:
+                # For messages without a namespace, add their field enums to the global scope
+                for field in message.fields:
+                    if field.field_type == FieldType.ENUM:
+                        enum_name = f"{message.name}_{field.name}_Enum"
+                        if enum_name not in enums_generated:
+                            global_message_field_enums.append((message, field, enum_name))
+                    elif field.field_type == FieldType.OPTIONS:
+                        enum_name = f"{message.name}_{field.name}_Options"
+                        if enum_name not in enums_generated:
+                            global_message_field_enums.append((message, field, enum_name))
 
         # Write enums for global messages
         for message in global_messages:
@@ -403,7 +499,10 @@ class UnrealCppGenerator(BaseCppGenerator):
                     enum_name = f"{message.name}_{field.name}_Enum"
                     if enum_name not in enums_generated:
                         f.write(f"    // Enum for {message.name}.{field.name}\n")
-                        f.write(f"    enum class {enum_name} : uint8\n")
+                        # Create a temporary enum object to determine the size
+                        temp_enum = Enum(enum_name, field.enum_values)
+                        size_bits = temp_enum.get_min_size_bits()
+                        f.write(f"    enum class {enum_name} : uint{size_bits}\n")
                         f.write("    {\n")
                         for enum_value in field.enum_values:
                             f.write(f"        {enum_value.name} = {enum_value.value},\n")
@@ -413,6 +512,7 @@ class UnrealCppGenerator(BaseCppGenerator):
                     enum_name = f"{message.name}_{field.name}_Options"
                     if enum_name not in enums_generated:
                         f.write(f"    // Options for {message.name}.{field.name}\n")
+                        # Options are always uint32 as they're used as bit flags
                         f.write(f"    enum class {enum_name} : uint32\n")
                         f.write("    {\n")
                         for enum_value in field.enum_values:
@@ -420,32 +520,69 @@ class UnrealCppGenerator(BaseCppGenerator):
                         f.write("    };\n\n")
                         enums_generated.add(enum_name)
 
+        # Write enums for global message fields
+        for message, field, enum_name in global_message_field_enums:
+            if field.field_type == FieldType.ENUM:
+                if enum_name not in enums_generated:
+                    f.write(f"    // Enum for {message.name}.{field.name}\n")
+                    # Create a temporary enum object to determine the size
+                    temp_enum = Enum(enum_name, field.enum_values)
+                    size_bits = temp_enum.get_min_size_bits()
+                    f.write(f"    enum class {enum_name} : uint{size_bits}\n")
+                    f.write("    {\n")
+                    for enum_value in field.enum_values:
+                        f.write(f"        {enum_value.name} = {enum_value.value},\n")
+                    f.write("    };\n\n")
+                    enums_generated.add(enum_name)
+            elif field.field_type == FieldType.OPTIONS:
+                if enum_name not in enums_generated:
+                    f.write(f"    // Options for {message.name}.{field.name}\n")
+                    # Options are always uint32 as they're used as bit flags
+                    f.write(f"    enum class {enum_name} : uint32\n")
+                    f.write("    {\n")
+                    for enum_value in field.enum_values:
+                        f.write(f"        {enum_value.name} = {enum_value.value},\n")
+                    f.write("    };\n\n")
+                    enums_generated.add(enum_name)
+
         # Write enums for namespaced messages
         for namespace_name, messages in namespaced_messages.items():
-            f.write(f"    namespace {namespace_name} {{\n")
-            for message in messages:
-                for field in message.fields:
+            # Check if we've already written this namespace
+            if namespace_name not in namespaced_enums:
+                f.write(f"    namespace {namespace_name} {{\n")
+                namespace_written = False
+            else:
+                namespace_written = True
+
+            # Write message field enums for this namespace
+            for message, field, enum_name in message_field_enums.get(namespace_name, []):
+                if enum_name not in enums_generated:
                     if field.field_type == FieldType.ENUM:
-                        enum_name = f"{message.name}_{field.name}_Enum"
-                        if enum_name not in enums_generated:
-                            f.write(f"        // Enum for {message.name}.{field.name}\n")
-                            f.write(f"        enum class {enum_name} : uint8\n")
-                            f.write("        {\n")
-                            for enum_value in field.enum_values:
-                                f.write(f"            {enum_value.name} = {enum_value.value},\n")
-                            f.write("        };\n\n")
-                            enums_generated.add(enum_name)
+                        f.write(f"        // Enum for {message.name}.{field.name}\n")
+                        # Create a temporary enum object to determine the size
+                        temp_enum = Enum(enum_name, field.enum_values)
+                        size_bits = temp_enum.get_min_size_bits()
+                        f.write(f"        enum class {enum_name} : uint{size_bits}\n")
+                        f.write("        {\n")
+                        for enum_value in field.enum_values:
+                            f.write(f"            {enum_value.name} = {enum_value.value},\n")
+                        f.write("        };\n\n")
+                        enums_generated.add(enum_name)
                     elif field.field_type == FieldType.OPTIONS:
-                        enum_name = f"{message.name}_{field.name}_Options"
-                        if enum_name not in enums_generated:
-                            f.write(f"        // Options for {message.name}.{field.name}\n")
-                            f.write(f"        enum class {enum_name} : uint32\n")
-                            f.write("        {\n")
-                            for enum_value in field.enum_values:
-                                f.write(f"            {enum_value.name} = {enum_value.value},\n")
-                            f.write("        };\n\n")
-                            enums_generated.add(enum_name)
-            f.write(f"    }} // namespace {namespace_name}\n\n")
+                        f.write(f"        // Options for {message.name}.{field.name}\n")
+                        # Options are always uint32 as they're used as bit flags
+                        f.write(f"        enum class {enum_name} : uint32\n")
+                        f.write("        {\n")
+                        for enum_value in field.enum_values:
+                            f.write(f"            {enum_value.name} = {enum_value.value},\n")
+                        f.write("        };\n\n")
+                        enums_generated.add(enum_name)
+
+            # Only close the namespace if we opened it
+            if not namespace_written:
+                f.write(f"    }} // namespace {namespace_name}\n\n")
+
+        # All message field enums should now be written
 
     def _write_serialization_utils(self, f: TextIO) -> None:
         """
@@ -1276,6 +1413,11 @@ class StandardCppGenerator(BaseCppGenerator):
                 for message in messages:
                     filtered_model.add_message(message)
 
+                # Add standalone enums to the filtered model, but only from the current file
+                for enum_name, enum in self.model.enums.items():
+                    if enum.source_file == source_file:
+                        filtered_model.add_enum(enum)
+
                 # Generate the header file
                 with open(header_file, 'w') as f:
                     self._write_header(f)
@@ -1442,6 +1584,53 @@ class StandardCppGenerator(BaseCppGenerator):
 
         enums_generated = set()
 
+        # Group standalone enums by namespace
+        global_enums = []
+        namespaced_enums = {}
+
+        for enum_name, enum in model.enums.items():
+            if enum.namespace:
+                if enum.namespace not in namespaced_enums:
+                    namespaced_enums[enum.namespace] = []
+                namespaced_enums[enum.namespace].append(enum)
+            else:
+                global_enums.append(enum)
+
+        # Write standalone enums for global scope
+        for enum in global_enums:
+            if enum.name not in enums_generated:
+                f.write(f"    // Standalone enum {enum.name}\n")
+                # Determine the appropriate size for the enum
+                size_bits = enum.get_min_size_bits()
+                if enum.is_open:
+                    f.write(f"    enum {enum.name} : uint{size_bits}_t\n")
+                else:
+                    f.write(f"    enum class {enum.name} : uint{size_bits}_t\n")
+                f.write("    {\n")
+                for enum_value in enum.values:
+                    f.write(f"        {enum_value.name} = {enum_value.value},\n")
+                f.write("    };\n\n")
+                enums_generated.add(enum.name)
+
+        # Write standalone enums for namespaced scope
+        for namespace_name, enums in namespaced_enums.items():
+            f.write(f"    namespace {namespace_name} {{\n")
+            for enum in enums:
+                if enum.name not in enums_generated:
+                    f.write(f"        // Standalone enum {enum.name}\n")
+                    # Determine the appropriate size for the enum
+                    size_bits = enum.get_min_size_bits()
+                    if enum.is_open:
+                        f.write(f"        enum {enum.name} : uint{size_bits}_t\n")
+                    else:
+                        f.write(f"        enum class {enum.name} : uint{size_bits}_t\n")
+                    f.write("        {\n")
+                    for enum_value in enum.values:
+                        f.write(f"            {enum_value.name} = {enum_value.value},\n")
+                    f.write("        };\n\n")
+                    enums_generated.add(enum.name)
+            f.write(f"    }} // namespace {namespace_name}\n\n")
+
         # Group messages by namespace
         global_messages = []
         namespaced_messages = {}
@@ -1465,7 +1654,10 @@ class StandardCppGenerator(BaseCppGenerator):
                     enum_name = f"{message.name}_{field.name}_Enum"
                     if enum_name not in enums_generated:
                         f.write(f"    // Enum for {message.name}.{field.name}\n")
-                        f.write(f"    enum class {enum_name} : uint8_t\n")
+                        # Create a temporary enum object to determine the size
+                        temp_enum = Enum(enum_name, field.enum_values)
+                        size_bits = temp_enum.get_min_size_bits()
+                        f.write(f"    enum class {enum_name} : uint{size_bits}_t\n")
                         f.write("    {\n")
                         for enum_value in field.enum_values:
                             f.write(f"        {enum_value.name} = {enum_value.value},\n")
@@ -1475,6 +1667,7 @@ class StandardCppGenerator(BaseCppGenerator):
                     enum_name = f"{message.name}_{field.name}_Options"
                     if enum_name not in enums_generated:
                         f.write(f"    // Options for {message.name}.{field.name}\n")
+                        # Options are always uint32_t as they're used as bit flags
                         f.write(f"    enum class {enum_name} : uint32_t\n")
                         f.write("    {\n")
                         for enum_value in field.enum_values:
@@ -1484,14 +1677,23 @@ class StandardCppGenerator(BaseCppGenerator):
 
         # Write enums for namespaced messages
         for namespace_name, messages in namespaced_messages.items():
-            f.write(f"    namespace {namespace_name} {{\n")
+            # Check if we've already written this namespace
+            if namespace_name not in namespaced_enums:
+                f.write(f"    namespace {namespace_name} {{\n")
+                namespace_written = False
+            else:
+                namespace_written = True
+
             for message in messages:
                 for field in message.fields:
                     if field.field_type == FieldType.ENUM:
                         enum_name = f"{message.name}_{field.name}_Enum"
                         if enum_name not in enums_generated:
                             f.write(f"        // Enum for {message.name}.{field.name}\n")
-                            f.write(f"        enum class {enum_name} : uint8_t\n")
+                            # Create a temporary enum object to determine the size
+                            temp_enum = Enum(enum_name, field.enum_values)
+                            size_bits = temp_enum.get_min_size_bits()
+                            f.write(f"        enum class {enum_name} : uint{size_bits}_t\n")
                             f.write("        {\n")
                             for enum_value in field.enum_values:
                                 f.write(f"            {enum_value.name} = {enum_value.value},\n")
@@ -1501,13 +1703,17 @@ class StandardCppGenerator(BaseCppGenerator):
                         enum_name = f"{message.name}_{field.name}_Options"
                         if enum_name not in enums_generated:
                             f.write(f"        // Options for {message.name}.{field.name}\n")
+                            # Options are always uint32_t as they're used as bit flags
                             f.write(f"        enum class {enum_name} : uint32_t\n")
                             f.write("        {\n")
                             for enum_value in field.enum_values:
                                 f.write(f"            {enum_value.name} = {enum_value.value},\n")
                             f.write("        };\n\n")
                             enums_generated.add(enum_name)
-            f.write(f"    }} // namespace {namespace_name}\n\n")
+
+            # Only close the namespace if we opened it
+            if not namespace_written:
+                f.write(f"    }} // namespace {namespace_name}\n\n")
 
     def _write_structs(self, f: TextIO, model: MessageModel = None) -> None:
         """

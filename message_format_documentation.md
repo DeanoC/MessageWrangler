@@ -852,17 +852,17 @@ For extended enum references, the additional enum values are added to the field 
   ```
   This would allow fields to reference message types defined in other namespaces. Currently, using a message directly as a field type is not supported and will generate an error. Message inheritance should be used instead to achieve similar functionality.
 
-- [ ] **Enum number check**
+- [x] **Enum number check**
   ```
   field baseMessage: enum { Zero = 1, Dup = 1 }
   ```
-  Enums cannot have duplicate values. This will generate an error during parsing. This should included auto generate enum numbers and enum inheritance when implemented.
+  Enums cannot have duplicate values. This will generate an error during parsing. This includes auto-generated enum numbers and enum inheritance.
 
-- [ ] **Non message enum + named enums**
+- [x] **Non message enum + named enums**
   ```
   enum baseEnum { Zero = 1, Two = 2 }
   ```
-  Define enums seperate from a message, they do not have to be inside a message. This allows enums to be used in multiple messages without duplicating the enum definition. This should included auto generate enum numbers and enum inheritance when implemented. They should be included in the generators as standalone enums
+  Define enums separate from a message, they do not have to be inside a message. This allows enums to be used in multiple messages without duplicating the enum definition. This should included auto generate enum numbers and enum inheritance when implemented. They should be included in the generators as standalone enums
 
 - [ ] **Open Enum**
   ```
@@ -872,17 +872,30 @@ For extended enum references, the additional enum values are added to the field 
   ```
   This allows some enums to be defined as open enums, which can be extended in derived messages. 
   The derived enum can add additional values and also close the enum if of type enum (stays open if open_enum).
-  A closed enum used a generated strict mode (if it has it, only allowing values specified), 
-  an open mode uses the generators less strict mode (allowing any value).  
+  A closed enum used a generator strict mode (if it has it, a type that only allows values specified).
+  An open mode uses the generators less strict mode (allowing any value of the enums type).  
   In c++ terms an enum is 'enum class' whereas open_enum are enums and can be used as int.
   Options which are internally implemented as enums are always open enums.
-  This should include auto generate enum numbers and enum inheritance when implemented.
+  This should include auto-generate enum numbers, enum inheritance, and duplicate checks.
 
 - [x] **Enum numbering**
   ```
   field baseMessage: enum { Zero = 1, Ten = 11, Eleven, Thousand = 1000 }
   ```
   This allows enum to take specific values and auto-increment from the last defined value. Enum values can be explicitly assigned (e.g., `Zero = 1`) or auto-incremented from the last defined value (e.g., `Eleven` after `Ten = 11` would be 12). If no explicit value is assigned to the first enum value, it starts from 0.
+
+- [ ] **Constant equations**
+  ```
+  enum numbers { Zero = 0, Two = Zero + 2 , Eleven = Two + 10 - 1, Thousand = 10 * 100 }
+  ```
+  Allow anywhere a constant number is used (Just enums currently but provide for future) to be a computed basic equation.
+  Should handle addition, subtraction, multiplication, and division. Parenthesis should be supported.
+  Basic bitwise operations should be supported ('and' and &, 'or' and |, 'xor' and ^, 'not' and ! and ~, Cstyle shifts << and >>).
+
+- [x] **Minimise sized enum**
+  Where known (closed enums) the size of the enum should be minimised to the smallest type that can hold all values.
+  This will only effect the generated code on some generators (c++ for example).
+  For unclosed enums, its should default to 32 bit unless a known value is greater than 32 bits wide, then it should use 64 bits.
 
 - [x] **Import Commands**
   ```

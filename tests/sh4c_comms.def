@@ -5,6 +5,16 @@ import "./sh4c_base.def" as Base
 
 /// Command the client can send to the server
 namespace ClientCommands {
+    enum Command : Base::Command.type + enum {
+        /// Change the mode of the server
+        ChangeMode = 1000,
+        /// Ask the server what modes are currently available
+        ModesAvailable
+    }
+
+    message CommCommand : Base::Command {
+        field typeX: enum Command
+    }
     /// Client to server messages
     message ChangeMode : Base::Command {
         field mode: enum {

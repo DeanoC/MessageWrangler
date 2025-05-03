@@ -321,6 +321,8 @@ namespace ClientCommands {{
                 assert "namespace ue_sh4c_comms" not in content, f"Namespace ue_sh4c_comms should not be in base file {file_name}"
                 # The base file should not have a "Base" namespace
                 assert "namespace Base {" not in content, f"Base namespace should not be in base file {file_name}"
+                # The base file should not have a "ClientCommands" namespace
+                assert "namespace ClientCommands" not in content, f"ClientCommands namespace should not be in base file {file_name}"
 
             # If this is the comms file (contains ClientCommands namespace)
             if "ClientCommands" in content:

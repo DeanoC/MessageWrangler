@@ -3,6 +3,7 @@ JSON Generator
 
 This module provides functionality for generating JSON schema definitions from the
 intermediate representation defined in message_model.py.
+It should NEVER have any specific code to handle troublesome cases.
 """
 
 import os
@@ -13,7 +14,8 @@ from message_model import (
     FieldType,
     Field,
     Message,
-    MessageModel
+    MessageModel,
+    Enum
 )
 
 

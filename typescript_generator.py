@@ -4,7 +4,7 @@ TypeScript Generator
 This module provides functionality for generating TypeScript code from the
 intermediate representation defined in message_model.py.
 It generates ES2015 standard TypeScript (no namespaces, etc.).
-
+It should NEVER have any specific code to handle troublesome cases.
 """
 
 import os
@@ -14,7 +14,8 @@ from message_model import (
     FieldType,
     Field,
     Message,
-    MessageModel
+    MessageModel,
+    Enum
 )
 
 
@@ -91,6 +92,10 @@ class TypeScriptGenerator:
                 filtered_model = MessageModel()
                 for message in messages:
                     filtered_model.add_message(message)
+
+                # Add standalone enums to the filtered model
+                for enum_name, enum in self.model.enums.items():
+                    filtered_model.add_enum(enum)
 
                 # Generate the TypeScript file
                 with open(ts_file, 'w') as f:
@@ -519,13 +524,29 @@ class TypeScriptGenerator:
 
         enums_generated = set()
 
+        # Write standalone enums
+        for enum_name, enum in model.enums.items():
+            ts_enum_name = enum_name.replace("::", "_")
+            if ts_enum_name not in enums_generated:
+                f.write(f"// Standalone enum {enum_name}\n")
+                if enum.comment:
+                    comment_lines = enum.comment.split('\n')
+                    for line in comment_lines:
+                        f.write(f"// {line}\n")
+                f.write(f"export enum {ts_enum_name} {{\n")
+                for enum_value in enum.values:
+                    f.write(f"    {enum_value.name} = {enum_value.value},\n")
+                f.write("}\n\n")
+                enums_generated.add(ts_enum_name)
+
+        # Write enums for message fields
         for message_name, message in model.messages.items():
             ts_message_name_part = message_name.replace("::", "_")
             for field in message.fields:
                 if field.field_type == FieldType.ENUM:
                     enum_name = f"{ts_message_name_part}_{field.name}_Enum"
                     if enum_name not in enums_generated:
-                        f.write(f"// Enum for {enum_name}\n")
+                        f.write(f"// Enum for {message_name}.{field.name}\n")
                         f.write(f"export enum {enum_name} {{\n")
                         for enum_value in field.enum_values:
                             f.write(f"    {enum_value.name} = {enum_value.value},\n")
@@ -534,7 +555,7 @@ class TypeScriptGenerator:
                 elif field.field_type == FieldType.OPTIONS:
                     enum_name = f"{ts_message_name_part}_{field.name}_Options"
                     if enum_name not in enums_generated:
-                        f.write(f"// Options for {enum_name}\n")
+                        f.write(f"// Options for {message_name}.{field.name}\n")
                         f.write(f"export enum {enum_name} {{\n")
                         for enum_value in field.enum_values:
                             f.write(f"    {enum_value.name} = {enum_value.value},\n")
