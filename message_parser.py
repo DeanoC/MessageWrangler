@@ -452,7 +452,7 @@ class MessageParser:
 
         Args:
             name: The name of the field
-            type_def: The type definition string (e.g., "enum { Value1, Value2 }")
+            type_def: The type definition string (e.g., "enum { Value1, Value2 }" or "enum { Zero = 1, Ten = 11, Eleven, Thousand = 1000 }")
             line_number: The line number where the field is defined (default: 0)
 
         Returns:
@@ -495,15 +495,35 @@ class MessageParser:
                 # Debug print
                 self.debug_print(f"DEBUG: Enum values: {enum_values}")
 
-                # Create EnumValue objects
-                for i, value_name in enumerate(enum_values):
-                    if value_name:  # Skip empty values
+                # Create EnumValue objects with support for explicit value assignments
+                current_value = 0  # Default starting value
+                for value_def in enum_values:
+                    if value_def:  # Skip empty values
+                        # Check if this enum value has an explicit assignment
+                        if '=' in value_def:
+                            # Split at the equals sign
+                            name_part, value_part = value_def.split('=', 1)
+                            value_name = name_part.strip()
+
+                            # Parse the value part as an integer
+                            try:
+                                value_part = value_part.strip()
+                                current_value = int(value_part)
+                            except ValueError:
+                                self.errors.append(f"Line {line_number}: Invalid enum value '{value_part}' for '{value_name}'. Must be an integer.")
+                                continue
+                        else:
+                            # No explicit assignment, use the current value
+                            value_name = value_def.strip()
+
                         # Check if enum value name is a reserved keyword
                         if self._is_reserved_keyword(value_name):
                             self.errors.append(f"Line {line_number}: Enum value '{value_name}' is a reserved keyword and cannot be used.")
                         else:
-                            enum_value = EnumValue(name=value_name, value=i)
+                            enum_value = EnumValue(name=value_name, value=current_value)
                             field.enum_values.append(enum_value)
+                            # Increment the current value for the next enum value
+                            current_value += 1
 
             return field
 

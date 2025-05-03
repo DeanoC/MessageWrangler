@@ -1,0 +1,33 @@
+message TestEnumNumbering {
+    /// Enum with explicit value assignments
+    field explicitValues: enum {
+        Zero = 0,
+        One = 1,
+        Ten = 10,
+        Hundred = 100
+    }
+
+    /// Enum with auto-increment from explicit values
+    field autoIncrement: enum {
+        Start = 5,
+        Next,       
+        Another     
+    }
+
+    /// Enum with a mix of explicit and implicit assignments
+    field mixedAssignments: enum {
+        First,      
+        Second = 2,
+        Third,      
+        Fourth = 10,
+        Fifth       
+    }
+
+    /// Enum with negative values
+    field negativeValues: enum {
+        Negative = -10,
+        NextNegative,  
+        Zero = 0,
+        Positive       
+    }
+}

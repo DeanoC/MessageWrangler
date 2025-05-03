@@ -811,6 +811,12 @@ While the current message format system is already feature-rich, there are still
   ```
   This would allow fields to reference message types defined in other namespaces. Currently, using a message directly as a field type is not supported and will generate an error. Message inheritance should be used instead to achieve similar functionality.
 
+- [x] **Enum numbering**
+  ```
+  field baseMessage: enum { Zero = 1, Ten = 11, Eleven, Thousand = 1000 }
+  ```
+  This allows enum to take specific values and auto-increment from the last defined value. Enum values can be explicitly assigned (e.g., `Zero = 1`) or auto-incremented from the last defined value (e.g., `Eleven` after `Ten = 11` would be 12). If no explicit value is assigned to the first enum value, it starts from 0.
+
 - [x] **Import Commands**
   ```
   import "./path.def" as Base

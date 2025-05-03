@@ -612,18 +612,26 @@ class UnrealCppGenerator(BaseCppGenerator):
             # If parent is in a namespace, include the namespace in the parent name
             parent_message = self.model.get_message(message.parent)
 
-            if parent_message and parent_message.namespace:
+            # Check if parent message is in the same file as this message
+            same_file = parent_message and parent_message.source_file and message.source_file and parent_message.source_file == message.source_file
+
+            if parent_message and parent_message.namespace and not same_file:
                 # Use the namespace directly without the output_name prefix
                 parent_name = f"{parent_message.namespace}::{parent_message.name}"
             else:
-                # If the parent message is not found or doesn't have a namespace,
+                # If the parent message is not found, doesn't have a namespace, or is in the same file,
                 # try to extract the namespace from the parent name
-                if '::' in message.parent:
+                if '::' in message.parent and not same_file:
                     namespace_name, message_name = message.parent.split('::', 1)
                     # Use the namespace directly
                     parent_name = message.parent
                 else:
-                    parent_name = message.parent
+                    # If the parent is in the same file or doesn't have a namespace,
+                    # use just the message name without the namespace
+                    if '::' in message.parent:
+                        parent_name = message.parent.split("::", 1)[1]
+                    else:
+                        parent_name = message.parent
 
             f.write(f"{indent} * @extends {parent_name}\n")
 
@@ -645,17 +653,25 @@ class UnrealCppGenerator(BaseCppGenerator):
             # If parent is in a namespace, include the namespace in the parent name
             parent_message = self.model.get_message(message.parent)
 
-            if parent_message and parent_message.namespace:
+            # Check if parent message is in the same file as this message
+            same_file = parent_message and parent_message.source_file and message.source_file and parent_message.source_file == message.source_file
+
+            if parent_message and parent_message.namespace and not same_file:
                 # Use the namespace directly without the output_name prefix
                 parent_name = f"{parent_message.namespace}::{parent_message.name}"
             else:
-                # If the parent message is not found or doesn't have a namespace,
+                # If the parent message is not found, doesn't have a namespace, or is in the same file,
                 # try to extract the namespace from the parent name
-                if '::' in message.parent:
+                if '::' in message.parent and not same_file:
                     # Use the namespace directly
                     parent_name = message.parent
                 else:
-                    parent_name = message.parent
+                    # If the parent is in the same file or doesn't have a namespace,
+                    # use just the message name without the namespace
+                    if '::' in message.parent:
+                        parent_name = message.parent.split("::", 1)[1]
+                    else:
+                        parent_name = message.parent
 
             f.write(f"{indent}struct {message.name} : public {parent_name}\n")
         else:
@@ -680,17 +696,25 @@ class UnrealCppGenerator(BaseCppGenerator):
             # If parent is in a namespace, include the namespace in the parent name
             parent_message = self.model.get_message(message.parent)
 
-            if parent_message and parent_message.namespace:
+            # Check if parent message is in the same file as this message
+            same_file = parent_message and parent_message.source_file and message.source_file and parent_message.source_file == message.source_file
+
+            if parent_message and parent_message.namespace and not same_file:
                 # Use the namespace directly without the output_name prefix
                 parent_name = f"{parent_message.namespace}::{parent_message.name}"
             else:
-                # If the parent message is not found or doesn't have a namespace,
+                # If the parent message is not found, doesn't have a namespace, or is in the same file,
                 # try to extract the namespace from the parent name
-                if '::' in message.parent:
+                if '::' in message.parent and not same_file:
                     # Use the namespace directly
                     parent_name = message.parent
                 else:
-                    parent_name = message.parent
+                    # If the parent is in the same file or doesn't have a namespace,
+                    # use just the message name without the namespace
+                    if '::' in message.parent:
+                        parent_name = message.parent.split("::", 1)[1]
+                    else:
+                        parent_name = message.parent
 
             f.write(f"{indent}        // Call parent class serialization\n")
             f.write(f"{indent}        TSharedPtr<FJsonObject> ParentJson = {parent_name}::ToJson();\n")
@@ -719,17 +743,25 @@ class UnrealCppGenerator(BaseCppGenerator):
             # If parent is in a namespace, include the namespace in the parent name
             parent_message = self.model.get_message(message.parent)
 
-            if parent_message and parent_message.namespace:
+            # Check if parent message is in the same file as this message
+            same_file = parent_message and parent_message.source_file and message.source_file and parent_message.source_file == message.source_file
+
+            if parent_message and parent_message.namespace and not same_file:
                 # Use the namespace directly without the output_name prefix
                 parent_name = f"{parent_message.namespace}::{parent_message.name}"
             else:
-                # If the parent message is not found or doesn't have a namespace,
+                # If the parent message is not found, doesn't have a namespace, or is in the same file,
                 # try to extract the namespace from the parent name
-                if '::' in message.parent:
+                if '::' in message.parent and not same_file:
                     # Use the namespace directly
                     parent_name = message.parent
                 else:
-                    parent_name = message.parent
+                    # If the parent is in the same file or doesn't have a namespace,
+                    # use just the message name without the namespace
+                    if '::' in message.parent:
+                        parent_name = message.parent.split("::", 1)[1]
+                    else:
+                        parent_name = message.parent
 
             f.write(f"{indent}        // Call parent class deserialization\n")
             f.write(f"{indent}        if (!{parent_name}::FromJson(JsonObject, OutMessage)) {{\n")
@@ -1561,17 +1593,25 @@ class StandardCppGenerator(BaseCppGenerator):
             # If parent is in a namespace, include the namespace in the parent name
             parent_message = self.model.get_message(message.parent)
 
-            if parent_message and parent_message.namespace:
+            # Check if parent message is in the same file as this message
+            same_file = parent_message and parent_message.source_file and message.source_file and parent_message.source_file == message.source_file
+
+            if parent_message and parent_message.namespace and not same_file:
                 # Use the namespace directly without the output_name prefix
                 parent_name = f"{parent_message.namespace}::{parent_message.name}"
             else:
-                # If the parent message is not found or doesn't have a namespace,
+                # If the parent message is not found, doesn't have a namespace, or is in the same file,
                 # try to extract the namespace from the parent name
-                if '::' in message.parent:
+                if '::' in message.parent and not same_file:
                     # Use the namespace directly
                     parent_name = message.parent
                 else:
-                    parent_name = message.parent
+                    # If the parent is in the same file or doesn't have a namespace,
+                    # use just the message name without the namespace
+                    if '::' in message.parent:
+                        parent_name = message.parent.split("::", 1)[1]
+                    else:
+                        parent_name = message.parent
 
             f.write(f"    struct {message_name} : public {parent_name}\n")
         else:
