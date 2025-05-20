@@ -47,8 +47,9 @@ import sys
 from typing import Dict, List, Any, Optional
 
 from message_model import MessageModel
-from message_parser import MessageParser
-from cpp_generator import UnrealCppGenerator, StandardCppGenerator
+from message_parser_core import MessageParser
+from cpp_generator.unreal_cpp_generator import UnrealCppGenerator
+from cpp_generator.standard_cpp_generator import StandardCppGenerator
 from typescript_generator import TypeScriptGenerator
 from json_generator import JsonGenerator
 from python_generator import PythonGenerator

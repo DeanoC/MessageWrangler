@@ -1,0 +1,9 @@
+import "base.def" as Base
+
+message MainMessage : Base::BaseMessage {
+    mainField: string;
+}
+
+message DerivedMessage : Base::AnotherBaseMessage {
+    derivedField: int;
+}

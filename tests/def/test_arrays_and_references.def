@@ -1,0 +1,34 @@
+// Test arrays and message references
+
+message Vec3 {
+    x: float
+    y: float
+    z: float
+}
+
+message WithArrays {
+    tags: string[]
+    points: Vec3[]
+    ids: int[]
+}
+
+message RefTest {
+    ref: Vec3
+    refArray: Vec3[]
+}
+
+namespace TestNS {
+    message Nested {
+        value: int
+    }
+}
+
+message WithNamespaceRef {
+    nested: TestNS::Nested
+    nestedArray: TestNS::Nested[]
+}
+
+message WithMap {
+    dict: Map<string, int>
+    objMap: Map<string, Vec3>
+}

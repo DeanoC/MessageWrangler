@@ -1,9 +1,0 @@
-// Test message definition file for optional fields
-
-message TestOptional {
-    field name: string;
-    field description: string optional;
-    field age: int optional;
-    field position: float { x, y, z } optional;
-    field status: enum { Active, Inactive, Pending } optional;
-}

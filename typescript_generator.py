@@ -225,7 +225,7 @@ class TypeScriptGenerator:
                         f.write(f"typeof obj.{field.name} === 'string'")
                     elif field.field_type == FieldType.INT or field.field_type == FieldType.FLOAT or field.field_type == FieldType.BYTE:
                         f.write(f"typeof obj.{field.name} === 'number'")
-                    elif field.field_type == FieldType.BOOLEAN:
+                    elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
                         f.write(f"typeof obj.{field.name} === 'boolean'")
                     elif field.field_type == FieldType.COMPOUND:
                         f.write(f"obj.{field.name} !== null && typeof obj.{field.name} === 'object'")
@@ -246,7 +246,7 @@ class TypeScriptGenerator:
                         f.write(f" && typeof obj.{field.name} === 'string'")
                     elif field.field_type == FieldType.INT or field.field_type == FieldType.FLOAT or field.field_type == FieldType.BYTE:
                         f.write(f" && typeof obj.{field.name} === 'number'")
-                    elif field.field_type == FieldType.BOOLEAN:
+                    elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
                         f.write(f" && typeof obj.{field.name} === 'boolean'")
                     elif field.field_type == FieldType.COMPOUND:
                         f.write(f" && obj.{field.name} !== null && typeof obj.{field.name} === 'object'")
@@ -647,7 +647,7 @@ class TypeScriptGenerator:
         elif field.field_type == FieldType.INT or field.field_type == FieldType.FLOAT:
             return "number"
 
-        elif field.field_type == FieldType.BOOLEAN:
+        elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
             return "boolean"
 
         elif field.field_type == FieldType.BYTE:
@@ -694,7 +694,7 @@ class TypeScriptGenerator:
         elif field.field_type == FieldType.FLOAT:
             return f"Float (number){optional_text}{default_text}"
 
-        elif field.field_type == FieldType.BOOLEAN:
+        elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
             return f"Boolean{optional_text}{default_text}"
 
         elif field.field_type == FieldType.BYTE:
@@ -765,7 +765,7 @@ class TypeScriptGenerator:
         elif field.field_type == FieldType.INT or field.field_type == FieldType.FLOAT:
             f.write(f"{field_indent}{field.name}{optional_mark}: number;\n")
 
-        elif field.field_type == FieldType.BOOLEAN:
+        elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
             f.write(f"{field_indent}{field.name}{optional_mark}: boolean;\n")
 
         elif field.field_type == FieldType.BYTE:

@@ -1,0 +1,60 @@
+// Test file with invalid syntax and reserved keywords
+
+/// This is a valid namespace
+namespace ValidNamespace {
+    /// This is a valid message
+    message ValidMessage {
+        /// This is a valid field
+        string valid_field;
+    }
+
+    /// This message has a reserved keyword as name
+    message enum {
+        /// This is a valid field
+        string valid_field;
+    }
+}
+
+/// This namespace has a reserved keyword as name
+namespace field {
+    /// This is a valid message
+    message ValidMessage {
+        /// This is a valid field
+        valid_field: string;
+    }
+}
+
+/// This is a valid message
+message AnotherValidMessage {
+    /// This field has a reserved keyword as name
+    message: string;
+
+    /// This enum field has a reserved keyword as value
+    enum_field: enum {
+        Valid,
+        field,
+        AnotherValid
+    }
+
+    /// This options field has a reserved keyword as value
+    options_field: options {
+        Valid,
+        message,
+        AnotherValid
+    }
+
+    /// This compound field has a reserved keyword as component
+    compound_field: float { x, y, enum }
+}
+
+// This is an invalid line with random text
+This is some random text that should cause an error.
+
+/// This is a valid message with a closing brace
+message ValidMessageWithBrace {
+    /// This is a valid field
+    valid_field: string;
+}
+
+// This is another invalid line
+Another random line that should cause an error.

@@ -1,0 +1,48 @@
+/// Message file for communication between sh4 companion client and server
+
+
+import "./sh4c_base.def" as Base
+
+/// Command the client can send to the server
+namespace ClientCommands {
+    enum Command : Base::Command.type {
+        /// Change the mode of the server
+        ChangeMode = 1000,
+        /// Ask the server what modes are currently available
+        ModesAvailable
+    }
+
+    message CommCommand : Base::Command {
+        typeX: enum Command
+    }
+    /// Client to server messages
+    message ChangeMode : Base::Command {
+        mode: enum {
+            /// Connect to the Unreal target through the server
+            Live,
+            /// Replay an previous Unreal session recorded by the server
+            Replay,
+            /// Connect to the Unreal Editor through the server
+            Editor
+        }
+    }
+    /// reply with the mode that was set (can be different from the one requested)
+    message ChangeModeReply : Base::Reply {
+        mode: enum {
+            /// Connect to the Unreal target through the server
+            Live,
+            /// Replay an previous Unreal session recorded by the server
+            Replay,
+            /// Connect to the Unreal Editor through the server
+            Editor
+        }
+    }
+
+    /// Ask the server what modes are currently available
+    message ModesAvailable : Base::Command {}
+    /// reply with the modes that are currently available
+    message ModesAvailableReply : Base::Reply {
+        available: options { Live, Replay, Editor }
+    }
+}
+

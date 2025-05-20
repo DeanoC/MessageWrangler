@@ -172,7 +172,7 @@ class JsonGenerator:
         elif field.field_type == FieldType.FLOAT:
             schema["type"] = "number"
 
-        elif field.field_type == FieldType.BOOLEAN:
+        elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
             schema["type"] = "boolean"
 
         elif field.field_type == FieldType.BYTE:
@@ -244,7 +244,7 @@ class JsonGenerator:
         elif field.field_type == FieldType.FLOAT:
             return f"Float{optional_text}{default_text}"
 
-        elif field.field_type == FieldType.BOOLEAN:
+        elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
             return f"Boolean{optional_text}{default_text}"
 
         elif field.field_type == FieldType.BYTE:

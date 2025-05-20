@@ -1,0 +1,9 @@
+// Test file for default values feature
+
+message DefaultValuesMessage {
+    stringField: string = "hello"
+    intField: int = 42
+    floatField: float = 3.14
+    enumField: enum { RED, GREEN, BLUE } = GREEN
+    optional optionalWithDefault: string = "optional with default"
+}

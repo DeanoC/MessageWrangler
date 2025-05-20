@@ -1,6 +1,7 @@
 # Message Format Documentation
 
 ## Table of Contents
+
 1. [Introduction](#introduction)
 2. [Current Message Format](#current-message-format)
    - [File Format Syntax](#file-format-syntax)
@@ -46,13 +47,13 @@ The message definition file (.def) uses a simple, human-readable syntax:
 
 ```
 message MessageName {
-    field fieldName: fieldType
-    field enumField: enum { Value1, Value2, Value3 }
-    field compoundField: baseType { component1, component2, component3 }
+    fieldType fieldName
+    enum { Value1, Value2, Value3 } enumField
+    baseType { component1, component2, component3 } compoundField
 }
 
 message DerivedMessage : BaseMessage {
-    field additionalField: fieldType
+    fieldType additionalField
 }
 ```
 
@@ -61,26 +62,26 @@ message DerivedMessage : BaseMessage {
 The parser supports multi-line definitions for enums, compounds, and fields. This makes the message definition files more readable and easier to maintain, especially for complex structures.
 
 Examples:
+
 ```
 // Multi-line enum definition
-field status: enum { 
-    Success, 
-    Failure, 
+enum {
+    Success,
+    Failure,
     Pending,
     InProgress,
     Cancelled
-};
+} status;
 
 // Multi-line compound definition
-field position: float { 
-    x, 
-    y, 
-    z 
-};
+float {
+    x,
+    y,
+    z
+} position;
 
 // Multi-line field definition
-field name: string
-;
+string name;
 ```
 
 ### Message Definitions
@@ -88,11 +89,12 @@ field name: string
 Messages are defined using the `message` keyword followed by the message name and a block of field definitions enclosed in curly braces. Each message represents a structure or interface that can be sent between the Electron application and Unreal Engine.
 
 Example:
+
 ```
 message ToolToUnrealCmd {
-    field command: enum { Ping, Position }
-    field verb: string
-    field actor: string
+    command: enum { Ping, Position }
+    verb: string
+    actor: string
 }
 ```
 
@@ -114,7 +116,7 @@ The current implementation supports the following field types:
 
 - **Field Modifiers**:
   - `optional`: Indicates that a field is optional and can be omitted
-  - `default(value)`: Specifies a default value for a field
+  - `= value`: Specifies a default value for a field
 
 ### Inheritance
 
@@ -129,26 +131,50 @@ message DerivedMessage : BaseMessage {
 Inheritance allows a derived message to include all fields from the base message, plus any additional fields defined in the derived message.
 
 Example:
+
 ```
 message UnrealToToolCmdUpdateReply : UnrealToToolCmdReply {
-    field position: float { x, y, z }
+    position: float { x, y, z }
 }
 ```
 
 ### Enum Definitions
 
-Enumerations are defined inline within field definitions using the `enum` keyword followed by a list of values enclosed in curly braces:
+Enumerations can be defined inline within field definitions or as top-level definitions using the `enum` keyword followed by a list of values enclosed in curly braces:
 
 ```
-field enumField: enum { Value1, Value2, Value3 }
+enum { Value1, Value2, Value3 } enumField
+
+enum MyEnum {
+    Value1,
+    Value2,
+    Value3
+}
 ```
 
-Each enum value is automatically assigned a numeric value starting from 0.
+Each enum value is automatically assigned a numeric value starting from 0 unless explicitly specified.
 
-Example:
+#### Enum Inheritance and References
+
+Enums can inherit from or reference other enums using the colon syntax, optionally with a qualified name (including namespace or message):
+
 ```
-field command: enum { Ping, Position }
+enum MyEnum : BaseEnum {
+    Value1 = 100,
+    Value2
+}
 ```
+
+You can also reference enums defined in other messages or namespaces:
+
+```
+enum MyEnum : Namespace::OtherEnum.Type {
+    Value1,
+    Value2
+}
+```
+
+**Note:** The previous syntax using `+ enum` for enum extension is no longer supported. To extend enums, simply use the colon syntax and add new values in the curly braces.
 
 In this example, `Ping` has a value of 0, and `Position` has a value of 1.
 
@@ -163,6 +189,7 @@ field optionsField: options { Option1, Option2, Option3 }
 Each option value is automatically assigned a power-of-two bit value (1, 2, 4, 8, etc.), allowing them to be combined using bitwise operations.
 
 Example:
+
 ```
 field permissions: options { Read, Write, Execute }
 ```
@@ -186,6 +213,7 @@ field compoundField: baseType { component1, component2, component3 }
 Currently, the only supported base type for compound fields is `float`.
 
 Example:
+
 ```
 field position: float { x, y, z }
 ```
@@ -202,6 +230,7 @@ field metadata: Metadata optional
 ```
 
 Optional fields are handled differently in each output format:
+
 - In C++: Documentation indicates the field is optional, and deserialization code doesn't fail if the field is missing
 - In TypeScript: Fields are marked with a question mark (e.g., `description?: string;`)
 - In JSON Schema: Optional fields are not included in the "required" array
@@ -217,6 +246,7 @@ field enabled: bool default(true)
 ```
 
 Default values are handled differently in each output format:
+
 - In C++: Fields are initialized with the default value in the struct definition, and the default value is used when deserializing if the field is missing from the JSON
 - In TypeScript: Default values are documented in the field comments using the @default JSDoc tag
 - In JSON Schema: Default values are included in the schema using the "default" property
@@ -230,6 +260,7 @@ Note: If a field is both optional and has a default value, the default value is 
 Users can add comments in the message definition file to explain the intent and purpose of messages and fields using the `///` syntax. These comments are parsed and included in the generated code (C++, TypeScript, and JSON), providing more context and documentation beyond just the mechanical structure of the messages.
 
 Example:
+
 ```
 /// This message is sent from the tool to Unreal Engine to issue a command.
 message ToolToUnrealCmd {
@@ -251,6 +282,7 @@ These comments are preserved in all generated output formats and appear as docum
 Users can add local comments in the message definition file using the `//` syntax. These comments are only for the .def file itself and are not propagated to the generated files.
 
 Example:
+
 ```
 // This is a local comment that will not appear in generated files
 message ToolToUnrealCmd {
@@ -269,6 +301,7 @@ This feature allows developers to add notes, explanations, or reminders that are
 Messages can be organized into logical namespaces to group related messages together and avoid name collisions.
 
 Example:
+
 ```
 namespace Tool {
     message Command {
@@ -286,6 +319,7 @@ namespace Unreal {
 ```
 
 In the generated code:
+
 - In C++, namespaces are translated to C++ namespaces within the namespace derived from the def file name
 - In TypeScript, namespaces are translated to nested namespaces within the namespace derived from the def file name
 - In JSON schema, namespaced messages use fully qualified names (namespace::message)
@@ -322,6 +356,7 @@ message UnrealToToolCmdUpdateReply : UnrealToToolCmdReply {
 ```
 
 This example defines three messages:
+
 1. `ToolToUnrealCmd`: A command sent from the tool to Unreal Engine, with a command enum, a verb string, and an actor string.
 2. `UnrealToToolCmdReply`: A reply from Unreal Engine to the tool, with a status enum.
 3. `UnrealToToolCmdUpdateReply`: A specialized reply that inherits from `UnrealToToolCmdReply` and adds a position compound field with x, y, and z components.
@@ -355,6 +390,7 @@ When using import statements, the converter generates separate files for each im
 3. The generated files include appropriate import statements to reference the imported definitions
 
 For example, if `main.def` imports `base.def`, the converter will generate:
+
 - `main_msgs.h` and `base_msgs.h` for C++
 - `main_msgs.ts` and `base_msgs.ts` for TypeScript
 - `main_msgs.py` and `base_msgs.py` for Python
@@ -373,6 +409,7 @@ For C++, the converter generates a header file (e.g., `example_msgs.h`) with the
 7. **Includes**: For imported files, appropriate #include statements are added to reference the imported definitions.
 
 Example C++ output:
+
 ```cpp
 // Auto-generated message definitions for C++
 #pragma once
@@ -439,6 +476,7 @@ For TypeScript, the converter generates a file (e.g., `example_msgs.ts`) with th
 7. **Type Guards**: Type guard functions are generated for each message type to enable runtime type checking.
 
 Example TypeScript output:
+
 ```typescript
 // Auto-generated message definitions for TypeScript
 
@@ -495,6 +533,7 @@ For Python, the converter generates a file (e.g., `example_msgs.py`) with the fo
 9. **Separate Files for Imported Definitions**: Each imported file generates its own Python file, with classes named according to the message names in that file.
 
 Example Python output:
+
 ```python
 # Auto-generated message definitions for Python
 
@@ -632,6 +671,7 @@ For JSON schema, the converter generates a file (e.g., `example_msgs_schema.json
 8. **Single File**: Unlike the other generators, JSON schema generation produces a single file that includes all definitions, including those from imported files.
 
 Example JSON schema output:
+
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -764,19 +804,23 @@ While the current message format system is already feature-rich, there are still
   - [ ] DateTime: Add support for date and time values
 
 - [ ] **Arrays and Collections**
+
   ```
   field tags: string[]
   field points: Vector3D[]
   field properties: Map<string, string>
   ```
+
   This would allow messages to contain collections of values.
 
 - [ ] **Validation Rules**
+
   ```
   field age: int min(0) max(120)
   field email: string regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
   field name: string minLength(1) maxLength(100)
   ```
+
   This would allow the system to validate message fields before sending or after receiving, ensuring data integrity.
 
 - [ ] **Additional Language Support**
@@ -786,28 +830,35 @@ While the current message format system is already feature-rich, there are still
   - [ ] Rust: For high-performance applications
 
 - [ ] **Versioning Support**
+
   ```
   message ToolToUnrealCmd version 2 {
       // Fields
   }
   ```
+
   This would allow the system to handle different versions of the same message, making it easier to evolve the protocol over time.
 
 - [ ] **Binary Format Support**
+
   ```
   python script.py --input messages.def --output ./generated --binary-format protobuf
   ```
+
   This would generate code for efficient binary serialization and deserialization.
 
 - [x] **Enum References**
+
 ```
 field mode: ChangeMode.Mode
 field namespaceMode: Namespace::ChangeMode.Mode
 field extendedMode: ChangeMode.Mode + { ADDITIONAL_MODE = 100, ANOTHER_MODE }
 ```
+
 This allows fields to reference enum types defined in other messages, enabling better code organization and reuse of enum definitions. Enum references can be to messages in the global scope or in namespaces. Additionally, enum references can be extended with additional values using the `+` operator followed by a list of additional enum values in curly braces.
 
 Example usage:
+
 ```
 // Define a message with an enum
 message EnumContainer {
@@ -847,30 +898,38 @@ The system validates enum references during parsing and ensures that the referen
 For extended enum references, the additional enum values are added to the field after copying the values from the referenced enum. If an additional enum value has the same name as a value in the referenced enum, an error is generated. Additional enum values can have explicit values (e.g., `CRITICAL = 100`) or auto-incremented values (e.g., `UNKNOWN` after `CRITICAL = 100` would be 101). If no explicit value is assigned to the first additional enum value, it starts from 1000 to avoid conflicts with the referenced enum values.
 
 - [ ] **Message References**
+
   ```
   field baseMessage: Base::BaseMessage
   ```
+
   This would allow fields to reference message types defined in other namespaces. Currently, using a message directly as a field type is not supported and will generate an error. Message inheritance should be used instead to achieve similar functionality.
 
 - [x] **Enum number check**
+
   ```
   field baseMessage: enum { Zero = 1, Dup = 1 }
   ```
+
   Enums cannot have duplicate values. This will generate an error during parsing. This includes auto-generated enum numbers and enum inheritance.
 
 - [x] **Non message enum + named enums**
+
   ```
   enum baseEnum { Zero = 1, Two = 2 }
   ```
+
   Define enums separate from a message, they do not have to be inside a message. This allows enums to be used in multiple messages without duplicating the enum definition. This should included auto generate enum numbers and enum inheritance when implemented. They should be included in the generators as standalone enums
 
 - [ ] **Open Enum**
+
   ```
   open_enum baseEnum { Zero = 1, Two = 2 }
   enum derivedEnum : baseEnum { Three = 3, Four = 4 }
   open_enum derivedEnum2 : baseEnum { Three = 3, Four = 4 }
   ```
-  This allows some enums to be defined as open enums, which can be extended in derived messages. 
+
+  This allows some enums to be defined as open enums, which can be extended in derived messages.
   The derived enum can add additional values and also close the enum if of type enum (stays open if open_enum).
   A closed enum used a generator strict mode (if it has it, a type that only allows values specified).
   An open mode uses the generators less strict mode (allowing any value of the enums type).  
@@ -879,15 +938,19 @@ For extended enum references, the additional enum values are added to the field 
   This should include auto-generate enum numbers, enum inheritance, and duplicate checks.
 
 - [x] **Enum numbering**
+
   ```
   field baseMessage: enum { Zero = 1, Ten = 11, Eleven, Thousand = 1000 }
   ```
+
   This allows enum to take specific values and auto-increment from the last defined value. Enum values can be explicitly assigned (e.g., `Zero = 1`) or auto-incremented from the last defined value (e.g., `Eleven` after `Ten = 11` would be 12). If no explicit value is assigned to the first enum value, it starts from 0.
 
 - [ ] **Constant equations**
+
   ```
   enum numbers { Zero = 0, Two = Zero + 2 , Eleven = Two + 10 - 1, Thousand = 10 * 100 }
   ```
+
   Allow anywhere a constant number is used (Just enums currently but provide for future) to be a computed basic equation.
   Should handle addition, subtraction, multiplication, and division. Parenthesis should be supported.
   Basic bitwise operations should be supported ('and' and &, 'or' and |, 'xor' and ^, 'not' and ! and ~, Cstyle shifts << and >>).
@@ -898,13 +961,17 @@ For extended enum references, the additional enum values are added to the field 
   For unclosed enums, its should default to 32 bit unless a known value is greater than 32 bits wide, then it should use 64 bits.
 
 - [x] **Import Commands**
+
   ```
   import "./path.def" as Base
   ```
+
   or
+
   ```
   import "./path.def"
   ```
+
   This allows including external .def files within the current file. When the "as" parameter is provided, the imported definitions are wrapped in the specified namespace. When the "as" parameter is omitted, the imported definitions are included directly in the current file without a namespace, as if they were defined in the current file. This enables:
   - Code reuse across multiple message definition files
   - Creation of message libraries that can be shared between projects
@@ -918,6 +985,7 @@ For extended enum references, the additional enum values are added to the field 
   The file path can be relative to the current file or absolute, allowing for flexible project structures.
 
   Example usage with namespace:
+
   ```
   // In base.def
   message BaseMessage {
@@ -935,6 +1003,7 @@ For extended enum references, the additional enum values are added to the field 
   In this example, the `BaseMessage` from `base.def` is imported into `main.def` with the namespace `Base`. The `MainMessage` then inherits from `Base::BaseMessage`, gaining access to its fields.
 
   Example usage without namespace:
+
   ```
   // In base.def
   message BaseMessage {

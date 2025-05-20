@@ -1,0 +1,11 @@
+namespace ue_sh4c_comms {
+    namespace Base {
+        message Reply {
+            status: string
+        }
+    }
+}
+
+message ChangeModeReply : ue_sh4c_comms::Base::Reply {
+    mode: string
+}

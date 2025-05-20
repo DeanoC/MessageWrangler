@@ -1,0 +1,48 @@
+// Test file for enum size minimization feature
+
+// 8-bit enum (values 0-255)
+enum Enum8Bit {
+    Min = 0,
+    Max = 255
+}
+
+// 16-bit enum (values that don't fit in 8 bits)
+enum Enum16Bit {
+    Min = 0,
+    Mid = 256,
+    Max = 65535
+}
+
+// 32-bit enum (values that don't fit in 16 bits)
+enum Enum32Bit {
+    Min = 0,
+    Mid = 65536,
+    Max = 2147483647
+}
+
+// 64-bit enum (values that don't fit in 32 bits)
+enum Enum64Bit {
+    Min = 0,
+    Mid = 2147483648,
+    Max = 9223372036854775807
+}
+
+// Open enum with small values (should default to 32-bit)
+open_enum OpenEnum8Bit {
+    Min = 0,
+    Max = 255
+}
+
+// Open enum with large values (should use 64-bit)
+open_enum OpenEnum64Bit {
+    Min = 0,
+    Max = 9223372036854775807
+}
+
+// Message with enum fields of different sizes
+message TestEnumSizes {
+    enum8Bit: enum { Min = 0, Max = 255 }
+    enum16Bit: enum { Min = 0, Max = 65535 }
+    enum32Bit: enum { Min = 0, Max = 2147483647 }
+    enum64Bit: enum { Min = 0, Max = 9223372036854775807 }
+}

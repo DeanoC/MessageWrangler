@@ -458,12 +458,12 @@ class PythonGenerator:
                     f.write(f"    {field.name}: {field_type} = 0\n")
                 elif field.field_type == FieldType.FLOAT:
                     f.write(f"    {field.name}: {field_type} = 0.0\n")
-                elif field.field_type == FieldType.BOOLEAN:
+                elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
                     f.write(f"    {field.name}: {field_type} = False\n")
                 elif field.field_type == FieldType.ENUM:
                     enum_name = self._to_cap_words(f"{py_message_name_part}_{field.name}_Enum")
                     # Use the first enum value as default
-                    if field.enum_values:
+                    if field.enum_values and len(field.enum_values) > 0:
                         first_value = field.enum_values[0].name
                         f.write(f"    {field.name}: {field_type} = {enum_name}.{first_value}\n")
                     else:
@@ -508,7 +508,7 @@ class PythonGenerator:
         elif field.field_type == FieldType.FLOAT:
             return "float"
 
-        elif field.field_type == FieldType.BOOLEAN:
+        elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
             return "bool"
 
         else:
@@ -553,7 +553,7 @@ class PythonGenerator:
                 default_value = default_value[1:-1]
             return f"\"{default_value}\""
 
-        elif field.field_type == FieldType.BOOLEAN:
+        elif field.field_type == FieldType.BOOLEAN or field.field_type == FieldType.BOOL:
             return "True" if field.default_value else "False"
 
         else:

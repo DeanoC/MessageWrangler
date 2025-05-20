@@ -1,0 +1,15 @@
+// Test file with unresolved message reference
+
+/// Base message for all commands
+
+message BaseCommand {
+    /// The type of command
+    type: string
+}
+
+/// Message that inherits from a non-existent message
+
+message InvalidCommand : NonExistentMessage {
+    /// Custom parameters
+    parameters: string
+}

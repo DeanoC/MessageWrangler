@@ -1,0 +1,6 @@
+message TestMessage {
+    type: enum {
+        Status
+    }
+    key: string
+}

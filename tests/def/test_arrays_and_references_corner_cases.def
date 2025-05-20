@@ -1,0 +1,57 @@
+// Corner case tests for arrays, maps, and references
+
+// 1. Arrays of arrays (should be rejected or handled)
+message InvalidNestedArray {
+    nestedArray: string[][]
+}
+
+// 2. Maps with array values
+message MapWithArray {
+    arrMap: Map<string, int[]>
+    objArrMap: Map<string, Vec3[]>
+}
+
+// 3. Arrays of maps
+message ArrayOfMaps {
+    mapArray: Map<string, int>[]
+}
+
+// 4. Maps with message reference values (including namespaced)
+namespace NS {
+    message Ref { value: int }
+}
+message MapWithRef {
+    refMap: Map<string, NS::Ref>
+}
+
+// 5. Arrays of enums/options
+message EnumArr {
+    status: enum { OK = 0, ERROR = 1 }[]
+}
+
+// 6. Maps with enum/options as value
+message MapEnum {
+    statusMap: Map<string, enum { OK = 0, ERROR = 1 }>
+}
+
+// 7. Maps with non-string keys (should be rejected)
+message MapNonStringKey {
+    intKeyMap: Map<int, string>
+}
+
+// 8. Arrays/Maps of unknown or undefined types
+message UnknownArr {
+    unknowns: UnknownType[]
+}
+
+// 9. Optional arrays/maps
+message OptionalArrMap {
+    tags: string[] optional
+    dict: Map<string, int> optional
+}
+
+// 10. Default values for arrays/maps (should be rejected or handled)
+message DefaultArrMap {
+    tags: string[] = ["a", "b"]
+    dict: Map<string, int> = {"a": 1}
+}

@@ -1,0 +1,9 @@
+// Test message definition file for optional fields
+
+message TestOptional {
+    name: string
+    optional description: string
+    optional age: int
+    optional position: float { x, y, z }
+    optional status: enum { Active, Inactive, Pending }
+}
