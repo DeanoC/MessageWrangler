@@ -62,6 +62,14 @@ def test_model_arrays_and_references():
     assert dict_field.is_map and dict_field.map_key_type == "string"
     assert obj_map_field.is_map and obj_map_field.map_key_type == "string"
 
+    # Additional: check map value type is available for generator
+    # For int map
+    assert hasattr(dict_field, "map_value_type"), "dict_field should have map_value_type for value type"
+    assert dict_field.map_value_type == "int", f"Expected map_value_type 'int' for dict_field, got {dict_field.map_value_type}"
+    # For message reference map
+    assert hasattr(obj_map_field, "map_value_type"), "obj_map_field should have map_value_type for value type"
+    assert obj_map_field.map_value_type == "Vec3", f"Expected map_value_type 'Vec3' for obj_map_field, got {obj_map_field.map_value_type}"
+
 if __name__ == "__main__":
     test_model_arrays_and_references()
     print("Model test passed.")

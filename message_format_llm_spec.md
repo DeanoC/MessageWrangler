@@ -2,6 +2,16 @@
 
 This document provides a concise, machine-readable specification of the message definition format used in this project. It is intended for use by large language models (LLMs) and other automated tools to understand, parse, and generate valid message definitions.
 
+## Recent Updates (2025-05)
+
+- **Cross-file and cross-namespace references**: All references to messages, enums, and compound types across files and namespaces are now correctly imported and available in generated code (Python, C++, TypeScript).
+- **Compound types**: For every referenced compound type (e.g., `SomeMessage_someField_Compound`), a class is generated and imported if not defined locally.
+- **Parent class references**: Parent classes in inheritance (e.g., `Base::Command`) are now always available in generated code via correct imports and class name resolution.
+- **Basic types**: Basic types (`string`, `int`, `float`, `bool`, `byte`) are never treated as message references.
+- **Reserved words and built-in names**: Field/component names that match Python reserved words or built-in types are suffixed with `_` in generated Python code to avoid conflicts.
+- **Parser strictness**: Nested arrays (e.g., `string[][]`) are explicitly rejected by the parser and will cause a parse error.
+- **Inline enums and compounds**: Inline enums and compound types are always emitted as classes in generated code if referenced.
+
 ---
 
 ## Top-Level Structure
@@ -13,7 +23,7 @@ This document provides a concise, machine-readable specification of the message 
 
 ## Message Definition
 
-```
+```text
 message MessageName [ : ParentMessage ] {
     fieldName: FieldType [field modifiers] [= defaultValue]
     ...
@@ -42,7 +52,7 @@ message MessageName [ : ParentMessage ] {
 
 ## Enum Definition
 
-```
+```text
 enum EnumName [ : ParentEnum ] {
     Value1 [= number],
     Value2 [= number],
@@ -58,7 +68,7 @@ enum EnumName [ : ParentEnum ] {
 
 ## Options Definition
 
-```
+```text
 options OptionsName {
     Option1 [= number],
     Option2 [= number],
@@ -72,7 +82,7 @@ options OptionsName {
 
 ## Namespace Definition
 
-```
+```text
 namespace NamespaceName {
     ...definitions...
 }
@@ -99,7 +109,7 @@ namespace NamespaceName {
 
 ## Import
 
-```
+```text
 import "./other.def" [as Namespace]
 ```
 
@@ -111,7 +121,7 @@ import "./other.def" [as Namespace]
 
 ### Message with basic fields
 
-```
+```text
 message Example {
     name: string
     id: int
@@ -121,7 +131,7 @@ message Example {
 
 ### Message with array, map, and reference
 
-```
+```text
 message Complex {
     tags: string[]
     points: Vec3[]
@@ -132,7 +142,7 @@ message Complex {
 
 ### Enum and options
 
-```
+```text
 enum Status {
     OK = 0,
     ERROR = 1
@@ -146,7 +156,7 @@ options Permissions {
 
 ### Namespaces and imports
 
-```
+```text
 namespace Tool {
     message Command {
         type: string
@@ -157,9 +167,9 @@ import "./base.def" as Base
 
 ---
 
-## Not Supported
+## Not Supported / Strictly Rejected
 
-- Nested arrays (e.g., `string[][]`) are not allowed.
+- Nested arrays (e.g., `string[][]`) are not allowed and will cause a parse error.
 - Maps must have `string` keys.
 - Default values for arrays/maps are not supported.
 - Only `float` is supported for compound types.
@@ -174,15 +184,16 @@ import "./base.def" as Base
 | Message        | message Foo { ... }                   |                                       |
 | Inheritance    | message Bar : Foo { ... }             |                                       |
 | Field          | name: string                          |                                       |
-| Array          | tags: string[]                        | No nested arrays                      |
+| Array          | tags: string[]                        | No nested arrays; nested arrays rejected |
 | Map            | dict: Map<string, int>                | Key must be string                    |
 | Enum           | enum Status { OK = 0, ERR = 1 }       | Inline or top-level                   |
-| Enum Ref       | field: OtherMsg.Status                |                                       |
+| Enum Ref       | field: OtherMsg.Status                | Cross-file/namespace refs imported    |
 | Options        | options Perms { Read = 1, ... }       | Bit flags                             |
-| Compound       | float { x, y, z }                     | Only float supported                  |
+| Compound       | float { x, y, z }                     | Only float supported; always emitted as class |
 | Namespace      | namespace NS { ... }                  |                                       |
-| Import         | import "./foo.def" as Bar             |                                       |
-| Comments       | /// doc, // local, /*...*/          | /// included in output                |
+| Import         | import "./foo.def" as Bar             | Cross-file/namespace refs imported    |
+| Comments       | /// doc, // local, /*...*/            | /// included in output                |
+| Reserved Names | tags_, dict_, ...                     | Reserved/built-in names suffixed with _ |
 
 ---
 

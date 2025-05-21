@@ -1,10 +1,9 @@
 
-import pytest
-import os
 import sys
+import os
 from tempfile import TemporaryDirectory
-
-# Add the parent directory to sys.path to allow importing from parent directory
+import pytest
+# Ensure the project root is on sys.path for all tests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 @pytest.fixture

@@ -101,7 +101,7 @@ class CompoundField:
 class Field:
     """Represents a field in a message."""
 
-    def __init__(self, name: str, field_type: FieldType, description: str = "", comment: str = "", optional: bool = False, default_value: Any = None, default_value_str: Optional[str] = None, enum_values: List[EnumValue] = None, compound_base_type: str = "", compound_components: List[str] = None, enum_reference: Optional[str] = None, additional_enum_values: List[EnumValue] = None, message_reference: Optional[str] = None, inline_message: Optional['Message'] = None, inline_enum: Optional['Enum'] = None, compound_reference: Optional[str] = None, inline_compound: Optional[Any] = None, options_reference: Optional[str] = None, inline_options: Optional[Dict[str, str]] = None, is_array: bool = False, array_size: Optional[int] = None, is_map: bool = False, map_key_type: Optional[str] = None, options: Dict[str, str] = None, source_file: Optional[str] = None, line_number: Optional[int] = None, type_name: Optional[str] = None, modifiers: Optional[list] = None):
+    def __init__(self, name: str, field_type: FieldType, description: str = "", comment: str = "", optional: bool = False, default_value: Any = None, default_value_str: Optional[str] = None, enum_values: List[EnumValue] = None, compound_base_type: str = "", compound_components: List[str] = None, enum_reference: Optional[str] = None, additional_enum_values: List[EnumValue] = None, message_reference: Optional[str] = None, inline_message: Optional['Message'] = None, inline_enum: Optional['Enum'] = None, compound_reference: Optional[str] = None, inline_compound: Optional[Any] = None, options_reference: Optional[str] = None, inline_options: Optional[Dict[str, str]] = None, is_array: bool = False, array_size: Optional[int] = None, is_map: bool = False, map_key_type: Optional[str] = None, map_value_type: Optional[str] = None, options: Dict[str, str] = None, source_file: Optional[str] = None, line_number: Optional[int] = None, type_name: Optional[str] = None, modifiers: Optional[list] = None):
         """
         Initialize a field.
 
@@ -160,6 +160,7 @@ class Field:
         self.array_size = array_size
         self.is_map = is_map
         self.map_key_type = map_key_type
+        self.map_value_type = map_value_type
         self.options = options if options is not None else {}
         self.source_file = source_file
         self.line_number = line_number

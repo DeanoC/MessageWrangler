@@ -297,11 +297,14 @@ def build_model_from_lark_tree(tree: Tree) -> MessageModel:
             value_type_node = actual_type_node.children[1]
             key_type = extract_type_name(key_type_node)
             value_type = extract_type_name(value_type_node)
+            if not value_type:
+                value_type = "Any"
             return Field(
                 name=fname,
                 field_type=FieldType.MAP,
                 is_map=True,
                 map_key_type=key_type,
+                map_value_type=value_type,
                 description=doc,
                 options=options,
                 modifiers=modifiers
@@ -341,17 +344,27 @@ def build_model_from_lark_tree(tree: Tree) -> MessageModel:
                 options=options,
                 modifiers=modifiers
             )
-        # Message reference type
+        # Message reference or basic type
         if actual_type_node and isinstance(actual_type_node, Tree) and actual_type_node.data == "ref_type":
             ref_name = extract_type_name(actual_type_node)
-            return Field(
-                name=fname,
-                field_type=FieldType.MESSAGE_REFERENCE,
-                message_reference=ref_name,
-                description=doc,
-                options=options,
-                modifiers=modifiers
-            )
+            if ref_name in ["string", "int", "float", "bool", "byte"]:
+                field_type = FieldType[ref_name.upper()]
+                return Field(
+                    name=fname,
+                    field_type=field_type,
+                    description=doc,
+                    options=options,
+                    modifiers=modifiers
+                )
+            else:
+                return Field(
+                    name=fname,
+                    field_type=FieldType.MESSAGE_REFERENCE,
+                    message_reference=ref_name,
+                    description=doc,
+                    options=options,
+                    modifiers=modifiers
+                )
             element_type_node = type_def_node.children[0]
             ref_name = extract_type_name(element_type_node)
             # Debug print
@@ -444,9 +457,23 @@ def build_model_from_lark_tree(tree: Tree) -> MessageModel:
             ftype = extract_type_name(type_def_node) if type_def_node else None
         except Exception:
             ftype = None
+        normalized_type = None
+        if ftype:
+            ftype_str = str(ftype).strip().lower()
+            # Map aliases (e.g., boolean -> bool)
+            if ftype_str == "boolean":
+                ftype_str = "bool"
+            # Only allow valid FieldType members
+            for member in FieldType:
+                if member.value == ftype_str:
+                    normalized_type = member
+                    break
+        field_type = normalized_type if normalized_type is not None else FieldType.UNKNOWN
+        # Diagnostic assertion: field_type must be a FieldType, never a string
+        assert isinstance(field_type, FieldType), f"Invalid field_type for field '{fname}': got {repr(field_type)} from ftype={repr(ftype)}"
         return Field(
             name=fname,
-            field_type=FieldType[ftype.upper()] if ftype and ftype.upper() in FieldType.__members__ else FieldType.UNKNOWN,
+            field_type=field_type,
             description=doc,
             options=options,
             modifiers=modifiers
