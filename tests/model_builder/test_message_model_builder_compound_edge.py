@@ -1,6 +1,6 @@
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 
 # Edge case: compound field with no components (should error or handle gracefully)
 def test_compound_field_no_components():
@@ -10,7 +10,7 @@ def test_compound_field_no_components():
     }
     """
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Test")
     field = msg.fields[0]
     assert field.field_type.name == "COMPOUND"
@@ -25,7 +25,7 @@ def test_compound_field_duplicate_components():
     }
     """
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Test")
     field = msg.fields[0]
     assert field.field_type.name == "COMPOUND"
@@ -40,7 +40,7 @@ def test_compound_field_unusual_base_type():
     }
     """
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Test")
     field = msg.fields[0]
     assert field.field_type.name == "COMPOUND"
@@ -56,7 +56,7 @@ def test_compound_field_with_comments_and_whitespace():
     }
     """
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Test")
     field = msg.fields[0]
     assert field.field_type.name == "COMPOUND"

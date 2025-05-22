@@ -23,7 +23,14 @@ def build_model_from_file_recursive(main_file_path: str, already_loaded=None) ->
     from lark_parser import parse_message_dsl
     tree = parse_message_dsl(text)
     this_file_actual_namespace = os.path.splitext(os.path.basename(abs_path))[0]
-    model = build_model_from_lark_tree(tree, this_file_actual_namespace)
+    model = _build_model_from_lark_tree(tree, this_file_actual_namespace, source_file=abs_path)
+    # --- FINAL PATCH: Ensure model.messages only contains FQN keys ---
+    # Remove any non-FQN keys (i.e., keys without '::')
+    fqn_messages = {}
+    for msg in model.messages.values():
+        fqn = msg.get_full_name()
+        fqn_messages[fqn] = msg
+    model.messages = fqn_messages
 
     # Find import statements in the file
     import_pattern = re.compile(r'^\s*import\s+"([^"]+)"\s+as\s+([A-Za-z_][A-Za-z0-9_]*)', re.MULTILINE)
@@ -109,7 +116,7 @@ def build_model_from_file_recursive(main_file_path: str, already_loaded=None) ->
     return model
 
 # Place this at the end of the file, after all helper functions (including process_node)
-def build_model_from_lark_tree(tree, current_processing_file_namespace: str):
+def _build_model_from_lark_tree(tree, current_processing_file_namespace: str, source_file: str = None):
     """
     Build a MessageModel from a Lark parse tree.
     Always creates and populates the file-level (global) namespace for global messages/enums.
@@ -120,6 +127,7 @@ def build_model_from_lark_tree(tree, current_processing_file_namespace: str):
     """
     from message_model import MessageModel, Message, Field, Enum, EnumValue, Namespace, FieldType
     model = MessageModel()
+    # (Undo patch) Namespace creation does not set source_file
     model.options = {}
     model.imports = {}
     _file_namespace_for_this_tree = current_processing_file_namespace
@@ -834,7 +842,7 @@ def build_model_from_lark_tree(tree, current_processing_file_namespace: str):
                 idx +=1
 
             values = parse_value_list(values_tree, kind="enum") if values_tree else []
-            enum_obj = Enum(name=name, values=values, parent=parent, description=doc, namespace=current_namespace, is_open=is_open)
+            enum_obj = Enum(name=name, values=values, parent=parent, description=doc, namespace=current_namespace, is_open=is_open, source_file=source_file)
             model.add_enum(enum_obj)
 
         elif node.data == "message":
@@ -860,7 +868,7 @@ def build_model_from_lark_tree(tree, current_processing_file_namespace: str):
 
             # If not in a namespace, assign the file-level namespace
             msg_namespace = current_namespace if current_namespace is not None else _file_namespace_for_this_tree
-            msg = Message(name=name, parent=parent, description=doc, comment=doc, namespace=msg_namespace)
+            msg = Message(name=name, parent=parent, description=doc, comment=doc, namespace=msg_namespace, source_file=source_file)
 
             # Process message_body elements
             while idx < len(node.children):

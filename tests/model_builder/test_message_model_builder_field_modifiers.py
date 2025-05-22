@@ -1,6 +1,6 @@
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 
 @pytest.mark.parametrize("dsl,expected_modifiers", [
     # Single modifier
@@ -47,7 +47,7 @@ from message_model_builder import build_model_from_lark_tree
 ])
 def test_field_modifiers(dsl, expected_modifiers):
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Get the first message in the model
     msg = next(iter(model.messages.values()))
     for field, expected in zip(msg.fields, expected_modifiers):

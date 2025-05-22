@@ -38,7 +38,7 @@ import glob
 import tempfile
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from generators.cpp_generator_std23 import CppGeneratorStd23
 
 def get_def_files():

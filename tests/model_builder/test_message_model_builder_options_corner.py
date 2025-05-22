@@ -3,14 +3,14 @@ Corner case tests for options_def and option values in build_model_from_lark_tre
 """
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 
 def test_options_def_empty():
     dsl = '''
     options EmptyOptions { }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
     # Always use the fully qualified name for options (global: just name, namespaced: Namespace::Name)
@@ -27,7 +27,7 @@ def test_options_def_with_comments_only():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
     only = opts.get("OnlyComments")  # Global options: no namespace
@@ -43,7 +43,7 @@ def test_options_def_with_trailing_comma():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
     trailing = opts.get("TrailingComma")  # Global options: no namespace
@@ -62,7 +62,7 @@ def test_options_def_with_interleaved_comments():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
     inter = opts.get("Interleaved")  # Global options: no namespace
@@ -85,7 +85,7 @@ def test_options_def_with_namespace_and_comments():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
     nsopts = opts.get("Edge::NSOptions")  # Namespaced options: Namespace::Name

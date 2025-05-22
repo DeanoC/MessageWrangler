@@ -1,6 +1,6 @@
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from message_model import FieldType
 
 def test_corner_cases_arrays_and_references():
@@ -12,7 +12,7 @@ def test_corner_cases_arrays_and_references():
     except lark.exceptions.UnexpectedCharacters:
         # Parser should fail on nested arrays, which is expected; skip the rest of the test
         return
-    model = build_model_from_lark_tree(tree)
+    model = _build_model_from_lark_tree(tree)
 
     # 1. Arrays of arrays (should be rejected or handled as error/unknown)
     invalid = model.get_message("InvalidNestedArray")

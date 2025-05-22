@@ -3,7 +3,7 @@ Additional tests for build_model_from_lark_tree with more complex message/enum/c
 """
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from message_model import FieldType
 
 def test_multiple_enums_and_messages_with_comments():
@@ -26,7 +26,7 @@ def test_multiple_enums_and_messages_with_comments():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Enum
     enum = model.get_enum("Status")
     assert enum is not None
@@ -70,7 +70,7 @@ def test_enum_and_message_with_interleaved_comments():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     enum = model.get_enum("Interleaved")
     assert enum is not None
     assert enum.description.strip().startswith("/// Enum with interleaved comments")

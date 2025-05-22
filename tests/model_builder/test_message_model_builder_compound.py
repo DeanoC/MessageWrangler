@@ -3,7 +3,7 @@ Test compound field extraction in build_model_from_lark_tree with a minimal inli
 """
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from message_model import FieldType
 
 def test_compound_field_minimal():
@@ -15,7 +15,7 @@ def test_compound_field_minimal():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Vec3Test")
     assert msg is not None
     field = next((f for f in msg.fields if f.name == "pos"), None)
@@ -31,7 +31,7 @@ def test_compound_field_with_different_base():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     msg = model.get_message("ColorTest")
     assert msg is not None
     field = next((f for f in msg.fields if f.name == "color"), None)
@@ -48,7 +48,7 @@ def test_multiple_compound_fields():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     msg = model.get_message("MultiCompound")
     assert msg is not None
     a = next((f for f in msg.fields if f.name == "a"), None)

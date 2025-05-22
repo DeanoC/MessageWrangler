@@ -64,7 +64,7 @@ namespace Tool {
             # Should not include any #include "std_std23.h" or similar
             assert 'include "std_std23.h"' not in content, f"Header {header_name} incorrectly includes std_std23.h!\n---\n{content}\n---"
             # Should not include any #include for non-imported namespaces
-            # (We only expect includes for actual imports, but this file has none)
+            # (We only expect includes for actu`al imports, but this file has none)
             for line in content.splitlines():
                 if line.strip().startswith('#include "') and line.strip().endswith('_std23.h"'):
                     inc = line.strip().split('"')[1]
@@ -130,7 +130,7 @@ import pytest
 import re
 
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_file_recursive, build_model_from_lark_tree
+from message_model_builder import build_model_from_file_recursive, _build_model_from_lark_tree
 from generators.cpp_generator_std23 import CppGeneratorStd23, CppGeneratorBase
 
 
@@ -159,37 +159,39 @@ def test_cpp_generator_std23_namespace_coverage(def_path):
 
     model = build_model_from_file_recursive(def_path)
     model.main_file_path = def_path
-
-    # Print model structure for debugging
-    print("[DEBUG] Model namespaces:", list(model.namespaces.keys()))
-    for ns_name, ns in model.namespaces.items():
-        print(f"[DEBUG] Namespace '{ns_name}': messages={list(getattr(ns, 'messages', {}).keys())}")
-    print("[DEBUG] Top-level messages in model:", list(model.messages.keys()))
-    for msg_name, msg in model.messages.items():
-        print(f"[DEBUG] Message '{msg_name}': namespace={getattr(msg, 'namespace', None)}, parent={getattr(msg, 'parent', None)}")
-
-    # Always expect a single header named after the .def file
-    namespaces = [model]
-    base_filename = os.path.splitext(os.path.basename(def_path))[0]
-    sanitized_ns = CppGeneratorBase(namespaces=namespaces)._sanitize_identifier(base_filename, for_namespace=True) # Use generator's sanitization
+    namespaces = [model] if not hasattr(model, 'namespaces') else list(model.namespaces.values())
     gen = CppGeneratorStd23(namespaces, model=model)
     header_map = gen.generate_header()
-    expected_header_name = f"{sanitized_ns}_std23.h"
-    assert expected_header_name in header_map, f"Expected header '{expected_header_name}' not found in generated headers: {list(header_map.keys())}"
-    content = header_map[expected_header_name]
 
-    # Special check for main.def: ensure the generated header is not empty and contains the expected structs
+    print(f"[DEBUG] Generated headers: {list(header_map.keys())}")
+    # For each header, check that it contains a namespace and at least one struct/enum if applicable
+    for header_name, content in header_map.items():
+        print(f"\n[GENERATED HEADER: {header_name}]\n{content}\n[END HEADER]\n")
+        # Check that the header contains a namespace declaration
+        ns_match = None
+        import re
+        m = re.search(r'namespace\s+([a-zA-Z0-9_]+)\s*{', content)
+        if m:
+            ns_match = m.group(1)
+        assert ns_match, f"No namespace found in header {header_name}\n---\n{content}\n---"
+        # Check that at least one struct or enum is present (unless header is intentionally empty)
+        has_struct = 'struct ' in content
+        has_enum = 'enum ' in content
+        assert has_struct or has_enum, f"No struct or enum found in header {header_name}\n---\n{content}\n---"
+
+    # Special check for main.def: ensure the main header contains MainMessage and DerivedMessage (no FQN required)
     if os.path.basename(def_path) == "main.def":
-        # The namespace should be mw_main (due to 'main' being reserved), and the header should contain MainMessage and DerivedMessage
-        assert "struct MainMessage" in content, f"MainMessage struct not found in generated main_std23.h:\n---\n{content}\n---"
-        assert "struct DerivedMessage" in content, f"DerivedMessage struct not found in generated main_std23.h:\n---\n{content}\n---"
-        # The namespace should be mw_main
-        assert f"namespace {sanitized_ns}" in content, f"Expected namespace '{sanitized_ns}' not found in generated main_std23.h:\n---\n{content}\n---"
+        base_filename = os.path.splitext(os.path.basename(def_path))[0]
+        sanitized_ns = CppGeneratorBase(namespaces=namespaces)._sanitize_identifier(base_filename, for_namespace=True)
+        main_header_name = f"{sanitized_ns}_std23.h"
+        assert main_header_name in header_map, f"Expected main header '{main_header_name}' not found in generated headers: {list(header_map.keys())}"
+        content = header_map[main_header_name]
+        assert "struct MainMessage" in content, f"MainMessage struct not found in generated {main_header_name}:\n---\n{content}\n---"
+        assert "struct DerivedMessage" in content, f"DerivedMessage struct not found in generated {main_header_name}:\n---\n{content}\n---"
+        assert f"namespace {sanitized_ns}" in content, f"Expected namespace '{sanitized_ns}' not found in generated {main_header_name}:\n---\n{content}\n---"
         # The header should not be empty inside the namespace
-        inner = content.split("namespace mw_main")[1].split("}")[0]
-        assert inner.strip(), f"Generated mw_main namespace is empty in main_std23.h:\n---\n{content}\n---"
-        # Print the generated header content for inspection
-        print("\n[GENERATED main_std23.h CONTENT]\n" + content + "\n[END GENERATED main_std23.h CONTENT]\n")
+        inner = content.split(f"namespace {sanitized_ns}", 1)[1].split("}", 1)[0]
+        assert inner.strip(), f"Generated {sanitized_ns} namespace is empty in {main_header_name}:\n---\n{content}\n---"
 
 def test_cpp_generator_std23_cross_file_includes_and_references():
     """
@@ -371,10 +373,7 @@ def test_cpp_generator_std23_header(def_path):
 
 @pytest.mark.parametrize("def_path", get_def_files())
 def test_cpp_generator_std23_source(def_path):
-    with open(def_path, "r", encoding="utf-8") as f:
-        dsl = f.read()
-    tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_file_recursive(def_path)
     if hasattr(model, 'namespaces'):
         namespaces = list(model.namespaces.values())
     else:

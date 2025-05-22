@@ -2,7 +2,7 @@ import os
 import glob
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from generators.python_generator_v3 import generate_python_code
 
 def get_def_files():
@@ -22,7 +22,7 @@ def test_python_generator_v3_output(def_path):
     with open(def_path, "r", encoding="utf-8") as f:
         dsl = f.read()
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = _build_model_from_lark_tree(tree)
     code = generate_python_code(model)
     if 'WithMap' in code:
         print("\n[DEBUG] Full generated code for WithMap test:\n" + code)

@@ -1,5 +1,5 @@
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from message_model import FieldType
 
 def test_basic_types_are_not_message_reference():
@@ -13,7 +13,7 @@ def test_basic_types_are_not_message_reference():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     msg = model.get_message("BasicTypes")
     assert msg is not None
     assert len(msg.fields) == 5

@@ -262,7 +262,7 @@ def generate_python_code(model: MessageModel, module_name: str = "messages", imp
 import os
 import re
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 
 def generate_all_python_files(def_files, output_dir):
     """
@@ -295,7 +295,7 @@ def generate_all_python_files(def_files, output_dir):
         with open(def_path, encoding="utf-8") as f:
             dsl = f.read()
         tree = parse_message_dsl(dsl)
-        model = build_model_from_lark_tree(tree)
+        model = _build_model_from_lark_tree(tree)
         module_name = os.path.splitext(os.path.basename(def_path))[0]
         code = generate_python_code(model, module_name, import_mods)
         os.makedirs(output_dir, exist_ok=True)

@@ -5,15 +5,25 @@ import pytest
 import glob
 import os
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from message_model import MessageModel, Message, Enum, FieldType
 
+# Test: Ensure model.messages only contains FQN keys (never unqualified names)
 @pytest.mark.parametrize("def_path", [
     f for f in glob.glob(os.path.join("tests", "def", "*.def"))
     if os.path.basename(f) not in {
         "test_invalid.def", "test_duplicate_fields.def", "test_arrays_and_references_corner_cases.def", "test_unresolved.def"
     }
 ])
+def test_model_messages_only_fqn_keys(def_path):
+    """
+    Ensure that model.messages only contains fully qualified names (with '::') as keys, never unqualified names.
+    """
+    from message_model_builder import build_model_from_file_recursive
+    model = build_model_from_file_recursive(def_path)
+    for key in model.messages.keys():
+        assert '::' in key, f"model.messages contains non-FQN key: '{key}' from {def_path}"
+
 def test_all_fields_resolved_in_def_files(def_path):
     # Assert all messages and enums have a non-None namespace
     for msg in model.messages.values():
@@ -84,7 +94,7 @@ def test_no_fieldtype_unknown():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     for msg in model.messages.values():
         for field in msg.fields:
             assert getattr(field, 'field_type', None) is not None, (
@@ -167,7 +177,7 @@ enum ExampleEnum {
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Check enum
     enum = model.get_enum("ExampleEnum")
     assert enum is not None
@@ -193,7 +203,7 @@ def test_namespace_and_inheritance():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Check namespace
     msg = model.get_message("Foo::Base")
     assert msg is not None
@@ -230,7 +240,7 @@ def test_all_fields_have_type():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Check all fields in all messages
     for msg in model.messages.values():
         for field in msg.fields:
@@ -261,7 +271,7 @@ def test_all_fields_have_type():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Check all fields in all messages
     for msg in model.messages.values():
         for field in msg.fields:
@@ -276,7 +286,7 @@ def test_all_fields_have_type():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Check namespace
     msg = model.get_message("Foo::Base")
     assert msg is not None
@@ -317,7 +327,7 @@ def test_all_fields_have_type():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Check all fields in all messages
     for msg in model.messages.values():
         for field in msg.fields:
@@ -352,7 +362,7 @@ def test_all_fields_have_type():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # Check all fields in all messages
     for msg in model.messages.values():
         for field in msg.fields:

@@ -1,5 +1,5 @@
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from message_model import Namespace
 
 def test_file_level_namespace_is_created_and_populated():
@@ -10,7 +10,7 @@ def test_file_level_namespace_is_created_and_populated():
     namespace Foo { message Bar { y: int } }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # The file-level namespace should be the default (e.g., 'test' or None)
     # Find the file-level namespace (should match the model's main_file_path if set, else fallback)
     file_ns = getattr(model, 'main_file_path', None)

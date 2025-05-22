@@ -8,6 +8,56 @@ import re
 from generators.cpp_generator import CppGeneratorBase
 
 class CppGeneratorStd23(CppGeneratorBase):
+    def _find_type_in_imports(self, type_name, import_map=None, already_visited=None):
+        """
+        Recursively search imported models for a type (message or enum) by name.
+        Returns (namespace, type_kind) if found, else (None, None).
+        type_kind is 'message' or 'enum'.
+        """
+        if already_visited is None:
+            already_visited = set()
+        model = getattr(self, 'model', None)
+        if not model or not hasattr(model, 'imports') or not model.imports:
+            return (None, None)
+        import_map = import_map or {}
+        from message_model_builder import build_model_from_file_recursive
+        for imported_ns, imported_path in model.imports.items():
+            imported_base = os.path.splitext(os.path.basename(imported_path))[0]
+            if imported_path in already_visited:
+                continue
+            already_visited.add(imported_path)
+            try:
+                imported_model = build_model_from_file_recursive(imported_path)
+                # Check messages
+                if hasattr(imported_model, 'messages') and type_name in imported_model.messages:
+                    ns = getattr(imported_model.messages[type_name], 'namespace', None)
+                    return (ns, 'message')
+                # Check enums
+                if hasattr(imported_model, 'enums') and type_name in imported_model.enums:
+                    ns = getattr(imported_model.enums[type_name], 'namespace', None)
+                    return (ns, 'enum')
+                # Recurse into further imports
+                sub_gen = CppGeneratorStd23([imported_model], model=imported_model)
+                ns, kind = sub_gen._find_type_in_imports(type_name, import_map, already_visited)
+                if ns:
+                    return (ns, kind)
+            except Exception:
+                continue
+        return (None, None)
+    def __init__(self, namespaces, options=None, model=None):
+        super().__init__(namespaces, options)
+        # Store the model if provided, so we can always find all enums/messages for a namespace
+        self.model = model
+
+    # DEBUG: Print model and namespace structure for diagnosis
+    def debug_model_structure(self):
+        model = getattr(self, 'model', None)
+        if model:
+            print("[DEBUG] Model namespaces:", list(getattr(model, 'namespaces', {}).keys()))
+            for ns_name_dbg, ns_obj in getattr(model, 'namespaces', {}).items():
+                print(f"[DEBUG] Namespace '{ns_name_dbg}': messages={list(getattr(ns_obj, 'messages', {}).keys())} enums={list(getattr(ns_obj, 'enums', {}).keys())}")
+            print("[DEBUG] Top-level messages in model:", list(getattr(model, 'messages', {}).keys()))
+            print("[DEBUG] Top-level enums in model:", list(getattr(model, 'enums', {}).keys()))
     def _cpp_base_class_name(self, parent, ns_name=None):
         """
         Given a parent reference (possibly with namespace, e.g., Base::Command),
@@ -86,37 +136,61 @@ class CppGeneratorStd23(CppGeneratorBase):
             def enum_ns_sanitized(enum):
                 ns = getattr(enum, 'namespace', None)
                 return self._sanitize_identifier(ns) if ns is not None else None
-            roots = [msg for msg in model.messages.values() if msg_ns_sanitized(msg) == sanitized_ns_name_raw]
-            enum_roots = [enum for enum in model.enums.values() if enum_ns_sanitized(enum) == sanitized_ns_name_raw]
-            for msg in roots:
-                collect_message_recursive(msg)
-            for enum in enum_roots:
-                collect_enum_recursive(enum)
+        print(f"[DEBUG] _generate_namespace_decls_only: ns_name_raw={ns_name_raw}, ns_name={ns_name}, sanitized_ns_name_raw={sanitized_ns_name_raw}")
+        print(f"[DEBUG] Model messages: {[ (m.name, getattr(m, 'namespace', None)) for m in model.messages.values() ]}")
+        print(f"[DEBUG] Model enums: {[ (e.name, getattr(e, 'namespace', None)) for e in model.enums.values() ]}")
+        roots = [msg for msg in model.messages.values() if msg_ns_sanitized(msg) == sanitized_ns_name_raw]
+        enum_roots = [enum for enum in model.enums.values() if enum_ns_sanitized(enum) == sanitized_ns_name_raw]
+        print(f"[DEBUG] Roots for ns '{sanitized_ns_name_raw}': {[m.name for m in roots]}")
+        print(f"[DEBUG] Enum roots for ns '{sanitized_ns_name_raw}': {[e.name for e in enum_roots]}")
+        for msg in roots:
+            collect_message_recursive(msg)
+        for enum in enum_roots:
+            collect_enum_recursive(enum)
 
         # Condition to determine if we are generating for the file-level namespace
         # or for a specific named namespace that might be embedded or standalone.
         is_file_level_context = ns_name == getattr(self, 'file_namespace', None)
 
         if is_file_level_context:
-            # File-level header context: emit messages/enums with no namespace OR with namespace matching the file-level namespace (raw or sanitized)
-            file_ns_raw = getattr(self, 'file_namespace', None)
-            file_ns_sanitized = self._sanitize_identifier(file_ns_raw) if file_ns_raw else None
-            def is_file_level_msg(m):
-                ns = getattr(m, 'namespace', None)
-                return (
-                    ns is None or ns == '' or
-                    ns == file_ns_raw or
-                    self._sanitize_identifier(ns) == file_ns_sanitized
-                )
-            def is_file_level_enum(e):
-                ns = getattr(e, 'namespace', None)
-                return (
-                    ns is None or ns == '' or
-                    ns == file_ns_raw or
-                    self._sanitize_identifier(ns) == file_ns_sanitized
-                )
-            messages_in_ns = [m for m in messages if is_file_level_msg(m)]
-            enums_in_ns = [e for e in enums if is_file_level_enum(e)]
+            # PATCH: For file-level header, emit all messages/enums from the main namespace (if any), else fallback to previous logic
+            main_ns_obj = None
+            if model and hasattr(model, 'namespaces') and model.namespaces:
+                # Prefer a namespace matching the sanitized_ns, else use the first
+                for ns_candidate in model.namespaces.values():
+                    ns_name_candidate = getattr(ns_candidate, 'name', None)
+                    if self._sanitize_identifier(ns_name_candidate, for_namespace=True) == ns_name:
+                        main_ns_obj = ns_candidate
+                        break
+                if not main_ns_obj:
+                    # Fallback: just use the first namespace
+                    main_ns_obj = next(iter(model.namespaces.values()))
+            if main_ns_obj:
+                # Only emit messages/enums defined in this namespace (not imported)
+                ns_name_actual = getattr(main_ns_obj, 'name', None)
+                messages_in_ns = [m for m in getattr(main_ns_obj, 'messages', {}).values()
+                                  if getattr(m, 'namespace', None) == ns_name_actual]
+                enums_in_ns = [e for e in getattr(main_ns_obj, 'enums', {}).values()
+                               if getattr(e, 'namespace', None) == ns_name_actual]
+            else:
+                # Fallback: previous logic (global messages)
+                target_sanitized_ns = self._sanitize_identifier(ns_name_raw)
+                seen_msg_names = set()
+                messages_in_ns = []
+                for m in model.messages.values():
+                    if self._sanitize_identifier(getattr(m, 'namespace', None)) == target_sanitized_ns:
+                        msg_name = self._sanitize_identifier(m.name)
+                        if msg_name not in seen_msg_names:
+                            messages_in_ns.append(m)
+                            seen_msg_names.add(msg_name)
+                seen_enum_names = set()
+                enums_in_ns = []
+                for e in model.enums.values():
+                    if self._sanitize_identifier(getattr(e, 'namespace', None)) == target_sanitized_ns:
+                        enum_name = self._sanitize_identifier(e.name)
+                        if enum_name not in seen_enum_names:
+                            enums_in_ns.append(e)
+                            seen_enum_names.add(enum_name)
             # Topologically sort messages so base classes come before derived classes
             def topo_sort_messages(msgs):
                 name_to_msg = {self._sanitize_identifier(m.name): m for m in msgs}
@@ -138,19 +212,19 @@ class CppGeneratorStd23(CppGeneratorBase):
             # Compound structs
             compound_map = self._collect_compound_fields(messages_in_ns)
             for struct_name, (field, parent_msg) in compound_map.items():
-                fq_struct_name = f"{ns_name}::{struct_name}" # Use ns_name (sanitized root_namespace) for qualification
+                fq_struct_name = f"{ns_name}::{struct_name}"
                 if fq_struct_name not in emitted_struct_names:
-                    decls.append(self._generate_compound_struct(struct_name, field, parent_msg, indent="    ", fully_qualify=True, ns_prefix=ns_name))
+                    decls.append(self._generate_compound_struct(struct_name, field, parent_msg, indent="    ", fully_qualify=False, ns_prefix=None))
                     emitted_struct_names.add(fq_struct_name)
             # Enums
-            for enum in enums_in_ns: # Use the newly defined enums_in_ns
+            for enum in enums_in_ns:
                 enum_cpp_name = self._sanitize_identifier(enum.name if not hasattr(enum, 'cpp_name') else enum.cpp_name)
                 enum_cpp_name = enum_cpp_name.split('::')[-1]
                 if not enum_cpp_name.endswith('_Enum'):
                     enum_cpp_name += '_Enum'
-                fq_enum_name = f"{ns_name}::{enum_cpp_name}" # Use ns_name for qualification
+                fq_enum_name = f"{ns_name}::{enum_cpp_name}"
                 if fq_enum_name not in emitted_enum_names:
-                    decls.append(self._generate_enum_full(enum, indent="    ", fully_qualify=True, ns_prefix=ns_name))
+                    decls.append(self._generate_enum_full(enum, indent="    ", fully_qualify=False, ns_prefix=None))
                     emitted_enum_names.add(fq_enum_name)
             # Inline enums and messages
             from message_model import FieldType
@@ -160,17 +234,16 @@ class CppGeneratorStd23(CppGeneratorBase):
                 for field in getattr(msg, 'fields', []):
                     if (getattr(field, 'field_type', None) == FieldType.INLINE_ENUM or getattr(field, 'inline_enum', None)) and hasattr(field, 'inline_enum') and field.inline_enum is not None:
                         enum_obj = field.inline_enum
-                        # For inline enums, the name is relative to the message, qualification uses ns_name
                         enum_cpp_name = f"{msg_cpp_name}_{self._sanitize_identifier(field.name)}_Enum"
                         fq_enum_name = f"{ns_name}::{enum_cpp_name}"
                         if fq_enum_name not in emitted_enum_names:
-                            decls.append(self._generate_enum_full(enum_obj, indent="    ", nested=True, fully_qualify=True, ns_prefix=ns_name))
+                            decls.append(self._generate_enum_full(enum_obj, indent="    ", nested=True, fully_qualify=False, ns_prefix=None))
                             emitted_enum_names.add(fq_enum_name)
-                fq_msg_name = f"{ns_name}::{msg_cpp_name}" # Use ns_name for qualification
+                fq_msg_name = f"{ns_name}::{msg_cpp_name}"
                 if fq_msg_name not in emitted_struct_names:
-                    decls.append(self._generate_message_struct(msg, ns_name, indent="    ", effective_ns=ns_name, fully_qualify=True, ns_prefix=ns_name))
+                    decls.append(self._generate_message_struct(msg, ns_name, indent="    ", effective_ns=ns_name, fully_qualify=False, ns_prefix=None))
                     emitted_struct_names.add(fq_msg_name)
-            return '\\n\\n'.join(decls)
+            return '\n\n'.join(decls)
         else:
             # Namespace-level context: emit messages/enums for this specific namespace (ns_name_raw)
             # This branch is hit when generating a dedicated header for a namespace (e.g. Main_std23.h)
@@ -179,18 +252,15 @@ class CppGeneratorStd23(CppGeneratorBase):
             # Always collect all messages from the model whose namespace matches the current namespace (raw or sanitized)
             if model:
                 target_sanitized_ns = self._sanitize_identifier(ns_name_raw)
-                messages_in_ns = [m for m in model.messages.values() if self._sanitize_identifier(getattr(m, 'namespace', None)) == target_sanitized_ns]
+                messages_in_ns = [m for m in model.messages.values()
+                                  if self._sanitize_identifier(getattr(m, 'namespace', None)) == target_sanitized_ns
+                                  and getattr(m, 'namespace', None) == ns_name_raw]
+                enums_in_ns = [e for e in enums
+                               if self._sanitize_identifier(getattr(e, 'namespace', None)) == target_sanitized_ns
+                               and getattr(e, 'namespace', None) == ns_name_raw]
             else:
                 messages_in_ns = []
-            
-           
-            enums_in_ns = []
-            for e_debug in enums:
-                enum_actual_ns_attr = getattr(e_debug, 'namespace', None)
-                sanitized_enum_ns = self._sanitize_identifier(enum_actual_ns_attr)
-                target_sanitized_ns = self._sanitize_identifier(ns_name_raw) # ns_name_raw is the key
-                if sanitized_enum_ns == target_sanitized_ns:
-                    enums_in_ns.append(e_debug)
+                enums_in_ns = []
 
             # Topologically sort messages so base classes come before derived classes
             def topo_sort_messages(msgs):
@@ -240,7 +310,7 @@ class CppGeneratorStd23(CppGeneratorBase):
                     print(f"[DEBUG] Emitting struct for: {fq_msg_name}")
                     decls.append(self._generate_message_struct(msg, msg_ns, indent="    ", effective_ns=msg_ns))
                     emitted_struct_names.add(fq_msg_name)
-            return '\\n\\n'.join(decls)
+            return '\n\n'.join(decls)
     def _generate_message_struct(self, msg, ns_name, nested_enums=None, indent="    ", effective_ns=None, fully_qualify=False, ns_prefix=None):
         """
         Compatibility wrapper for test and generator code expecting _generate_message_struct.
@@ -383,8 +453,7 @@ class CppGeneratorStd23(CppGeneratorBase):
             else:
                 base = f" : public {self._sanitize_identifier(parent)}"
         struct_name = self._sanitize_identifier(msg_name)
-        if fully_qualify and ns_prefix:
-            struct_name = f"{ns_prefix}::{struct_name}"
+        # Always use unqualified name for struct declaration inside the namespace
         struct_lines = [f"{doc}\n{indent}struct {struct_name}{base}\n{indent}{{"]
         has_fields = False
         for field in getattr(msg, 'fields', []):
@@ -443,10 +512,8 @@ class CppGeneratorStd23(CppGeneratorBase):
         for comp in components:
             fields.append(f"{indent}    {cpp_type} {self._sanitize_identifier(comp)};")
         fields_str = '\n'.join(fields)
-        # Patch: for fully qualified emission, prefix struct name
+        # Always use unqualified name for struct declaration inside the namespace
         name = struct_name
-        if fully_qualify and ns_prefix:
-            name = f"{ns_prefix}::{struct_name}"
         result = f"{doc}\n{indent}struct {name}\n{indent}{{\n{fields_str}\n{indent}}};"
         return result if result is not None else ""
     def __init__(self, namespaces, options=None, model=None):
@@ -470,130 +537,51 @@ class CppGeneratorStd23(CppGeneratorBase):
             if model_id in _already_loaded:
                 return {}
             _already_loaded.add(model_id)
+
         # --- RECURSIVELY GENERATE IMPORTED HEADERS FIRST ---
         import_map = {}
         if model and hasattr(model, 'imports') and model.imports:
+            import os
             from message_model_builder import build_model_from_file_recursive
             for imported_ns, imported_path in model.imports.items():
                 imported_base = os.path.splitext(os.path.basename(imported_path))[0]
                 import_map[imported_ns] = imported_base
-                # Load the full model for the imported file
                 imported_model = build_model_from_file_recursive(imported_path)
-                imported_model.main_file_path = imported_path  # Ensure correct header naming
+                imported_model.main_file_path = imported_path
                 imported_gen = CppGeneratorStd23([imported_model], model=imported_model)
                 imported_headers = imported_gen.generate_header(_already_loaded=_already_loaded)
                 headers.update(imported_headers)
-                    
-        # --- GENERATE MAIN HEADER AND FILE-LEVEL HEADER (CONDITIONALLY) ---
-        # Deduplication sets for the entire header
+
+        # --- GENERATE ONE HEADER PER NAMESPACE ---
         emitted_enum_names = set()
         emitted_struct_names = set()
-        # Always use the .def file's basename for the file-level header
-        if not def_path and model and hasattr(model, 'main_file_path') and model.main_file_path:
-            def_path = model.main_file_path
-        if def_path:
-            base_filename = os.path.splitext(os.path.basename(def_path))[0]
-            if not base_filename or base_filename == '':
-                print("[GENERATOR WARNING] Could not determine base_filename from def_path, using 'messages'. def_path:", def_path)
-                base_filename = 'messages'
-        else:
-            print("[GENERATOR WARNING] No def_path found for model; using 'messages' as base_filename.")
-            base_filename = 'messages'
         cpp_reserved = {"main", "namespace", "class", "struct", "enum", "union", "template", "typename", "public", "private", "protected", "virtual", "inline", "static", "const", "volatile", "mutable", "explicit", "friend", "operator", "this", "true", "false", "nullptr", "new", "delete", "default", "override", "final", "import", "export", "module", "requires", "co_await", "co_return", "co_yield"}
+        includes = "#include <string>\n#include <vector>\n#include <map>\n#include <memory>\n#include <cstdint>"
 
-        if base_filename is None:
-            base_filename = 'messages'
-        sanitized_ns = self._sanitize_identifier(str(base_filename), for_namespace=True)
-        filename = f"{sanitized_ns}_std23.h"
-        # Set file_namespace for use in decl emission
-        self.file_namespace = sanitized_ns
-
-        # Determine if there are any global (file-level) messages/enums
-        has_global = False
-        if model:
-            for msg in getattr(model, 'messages', {}).values():
-                ns = getattr(msg, 'namespace', None)
-                if not ns:
-                    has_global = True
-                    break
-            if not has_global:
-                for enum in getattr(model, 'enums', {}).values():
-                    ns = getattr(enum, 'namespace', None)
-                    if not ns:
-                        has_global = True
-                        break
-
-        # Always emit the file-level header, even if there are no global messages/enums
-        class PseudoNamespace:
-            def __init__(self, name):
-                self.name = name
-        pseudo_ns = PseudoNamespace(sanitized_ns)
-        decls = []
-        if has_global:
-            # Only global decls
-            decls.append(self._generate_namespace_decls_only(
-                pseudo_ns,
-                def_path=def_path,
-                header_filename=filename,
-                base_filename=sanitized_ns,
-                import_map=import_map,
-                root_namespace=sanitized_ns,
-                emitted_enum_names=emitted_enum_names,
-                emitted_struct_names=emitted_struct_names
-            ))
-        else:
-            # No global decls: emit all messages/enums for the main namespace (derived from file name or first namespace)
-            # Find the main namespace to emit
-            main_ns_obj = None
-            if model and hasattr(model, 'namespaces') and model.namespaces:
-                # Prefer a namespace matching the sanitized_ns, else use the first
+        if model and hasattr(model, 'namespaces') and model.namespaces:
+            import os
+            # Use the .def file base name for the header filename
+            if def_path:
+                file_base = os.path.splitext(os.path.basename(def_path))[0]
+                file_sanitized = self._sanitize_identifier(file_base, for_namespace=True)
+                ns_filename = f"{file_sanitized}_std23.h"
+                # If there is only one namespace, use it; otherwise, merge all into one header, each wrapped in its own namespace
+                ns_content = ""
                 for ns in model.namespaces.values():
-                    ns_name = getattr(ns, 'name', None)
-                    if self._sanitize_identifier(ns_name, for_namespace=True) == sanitized_ns:
-                        main_ns_obj = ns
-                        break
-                if not main_ns_obj:
-                    # Fallback: just use the first namespace
-                    main_ns_obj = next(iter(model.namespaces.values()))
-            if main_ns_obj:
-                ns_content = self._generate_namespace_header_full(
-                    main_ns_obj,
-                    def_path=def_path,
-                    header_filename=filename,
-                    base_filename=sanitized_ns,
-                    import_map=import_map,
-                    root_namespace=getattr(main_ns_obj, 'name', None),
-                    emitted_enum_names=emitted_enum_names,
-                    emitted_struct_names=emitted_struct_names
-                )
-                # Remove the namespace wrapper so we can nest the content in the file-level namespace
-                ns_content = self._strip_namespace_wrapper(ns_content, getattr(main_ns_obj, 'name', None))
+                    ns_name = self._sanitize_identifier(getattr(ns, 'name', None), for_namespace=True)
+                    inner_content = self._generate_namespace_header_full(
+                        ns,
+                        def_path=def_path,
+                        header_filename=ns_filename,
+                        base_filename=file_sanitized,
+                        import_map=import_map,
+                        root_namespace=getattr(ns, 'name', None),
+                        emitted_enum_names=emitted_enum_names,
+                        emitted_struct_names=emitted_struct_names
+                    )
+                    # Ensure content is wrapped in namespace block
+                    ns_content += f"namespace {ns_name} {{\n" + inner_content + f"\n}} // namespace {ns_name}\n"
                 if ns_content.strip():
-                    decls.append(ns_content)
-
-        # Track which header is the 'main' header to return if there are explicit namespaces
-        main_namespace_header = None
-        main_namespace_name = None
-
-        if model and hasattr(model, 'namespaces') and model.namespaces and len(model.namespaces) > 0:
-            # Pick the first namespace as the main one (could be improved to select by root_namespace if provided)
-            for idx, ns in enumerate(model.namespaces.values()):
-                ns_sanitized = self._sanitize_identifier(getattr(ns, 'name', None), for_namespace=True)
-                ns_filename = f"{ns_sanitized}_std23.h"
-                ns_content = self._generate_namespace_header_full(
-                    ns,
-                    def_path=def_path,
-                    header_filename=ns_filename,
-                    base_filename=ns_sanitized,
-                    import_map=import_map,
-                    root_namespace=getattr(ns, 'name', None),
-                    emitted_enum_names=emitted_enum_names,
-                    emitted_struct_names=emitted_struct_names
-                )
-                ns_content = self._strip_namespace_wrapper(ns_content, getattr(ns, 'name', None))
-                if ns_content.strip():
-                    includes = "#include <string>\n#include <vector>\n#include <map>\n#include <memory>\n#include <cstdint>"
-                    needed_headers = set()
                     include_directives = ""
                     alias_directives = ""
                     already_included = set()
@@ -618,46 +606,10 @@ class CppGeneratorStd23(CppGeneratorBase):
                         if alias_directives:
                             include_directives += alias_directives + "\n"
                     def_comment = f"// Source .def file: {def_path}" if def_path else "// Source .def file: (unknown)"
-                    header = f"// Auto-generated C++23 header for namespace {ns_sanitized}\n{def_comment}\n#pragma once\n\n{includes}\n\n{include_directives}namespace {ns_sanitized} {{\n"
-                    footer = f"\n}} // namespace {ns_sanitized}\n"
-                    content = header + ns_content + footer
+                    header = f"// Auto-generated C++23 header for file {file_sanitized}\n{def_comment}\n#pragma once\n\n{includes}\n\n{include_directives}"
+                    content = header + ns_content
                     headers[ns_filename] = content
-                    # Use the first non-empty namespace header as the main one if no global messages
-                    if main_namespace_header is None:
-                        main_namespace_header = ns_filename
-                        main_namespace_name = ns_sanitized
 
-        # Always emit the file-level header
-        includes = "#include <string>\n#include <vector>\n#include <map>\n#include <memory>\n#include <cstdint>"
-        needed_headers = set()
-        include_directives = ""
-        alias_directives = ""
-        already_included = set()
-        if import_map:
-            for alias, imported_base in import_map.items():
-                inc = f"{imported_base}_std23.h"
-                if inc not in already_included:
-                    include_directives += f"#include \"{inc}\"\n"
-                    already_included.add(inc)
-        for inc in sorted(getattr(self, '_last_needed_headers', set())):
-            if inc not in already_included:
-                include_directives += f"#include \"{inc}\"\n"
-                already_included.add(inc)
-        if import_map:
-            for alias, imported_base in import_map.items():
-                imported_ns = self._sanitize_identifier(imported_base)
-                alias_ns = self._sanitize_identifier(alias)
-                if imported_ns in cpp_reserved:
-                    imported_ns = f"ns_{imported_ns}"
-                if alias_ns != imported_ns:
-                    alias_directives += f"namespace {alias_ns} = {imported_ns};\n"
-            if alias_directives:
-                include_directives += alias_directives + "\n"
-        def_comment = f"// Source .def file: {def_path}" if def_path else "// Source .def file: (unknown)"
-        header = f"// Auto-generated C++23 header for file {sanitized_ns}\n{def_comment}\n#pragma once\n\n{includes}\n\n{include_directives}namespace {sanitized_ns} {{\n"
-        footer = f"\n}} // namespace {sanitized_ns}\n"
-        content = header + "\n\n".join(decls) + footer
-        headers[filename] = content
         # Assert that no generated header is named messages_*.h (indicates lost filename)
         for header_name in headers:
             assert not header_name.startswith("messages_") and not header_name == "messages_std23.h", (
@@ -693,136 +645,91 @@ class CppGeneratorStd23(CppGeneratorBase):
         """
         return {}  # Empty dict since C++23 implementation is header-only
 
-    def _generate_namespace_header_full(self, ns, def_path=None, header_filename=None, base_filename=None, import_map=None, root_namespace=None, emitted_enum_names=None, emitted_struct_names=None):
-        # All debug output must be after variable assignment
-        # Do NOT reset deduplication sets if provided
+    def _generate_namespace_header_full(self, ns, def_path=None, header_filename=None, base_filename=None, import_map=None, root_namespace=None, emitted_enum_names=None, emitted_struct_names=None) -> str:
         assert emitted_enum_names is not None and emitted_struct_names is not None, "Deduplication sets must be provided from generate_header."
-        # Always define current_ns_name_raw for use throughout the function
-        current_ns_name_raw = ns.name if hasattr(ns, 'name') else None
-        ns_name_raw = ns.name if hasattr(ns, 'name') else 'messages'
-        # Use the provided root_namespace if given, else fallback to sanitized ns_name_raw
-        if root_namespace is not None:
-            ns_name = root_namespace
-        else:
-            ns_name = self._sanitize_identifier(ns_name_raw)
+        ns_name = root_namespace if root_namespace is not None else self._sanitize_identifier(getattr(ns, 'name', None))
         decls = []
-        # Doc comment for namespace (prefer comment, fallback to description)
         ns_doc = getattr(ns, 'comment', None) or getattr(ns, 'description', None)
         if ns_doc:
             decls.append(self._doc_comment(ns_doc, indent=""))
 
-        # Robust recursive collection of all reachable messages/enums for this namespace
+        # Only emit messages/enums defined in the current model's .def file (not imported)
         model = getattr(self, 'model', None)
-        # DEBUG: Print all namespaces and messages in the model for diagnosis
-        if model:
-            print("[MODEL DEBUG] Namespaces in model:", list(getattr(model, 'namespaces', {}).keys()))
-            for ns_name_dbg, ns_obj in getattr(model, 'namespaces', {}).items():
-                print(f"[MODEL DEBUG] Namespace '{ns_name_dbg}': messages={list(getattr(ns_obj, 'messages', {}).keys())}")
-            print("[MODEL DEBUG] Top-level messages in model:", list(getattr(model, 'messages', {}).keys()))
-        enums = []
-        messages = []
-        if model:
-            seen_enum_fqnames = set()
-            seen_msg_fqnames = set()
+        model_file = getattr(model, 'main_file_path', None) if model else None
+        def is_defined_here(obj):
+            obj_file = getattr(obj, 'source_file', None)
+            # Normalize paths for comparison (case-insensitive, absolute, slashes)
+            if obj_file and model_file:
+                obj_file_norm = os.path.normcase(os.path.abspath(obj_file))
+                model_file_norm = os.path.normcase(os.path.abspath(model_file))
+                return obj_file_norm == model_file_norm
+            return obj_file == model_file
 
-            def fq_msg_name(msg):
-                ns = getattr(msg, 'namespace', None)
-                ns = ns if ns is not None else ns_name_raw
-                return f"{self._sanitize_identifier(ns)}::{self._sanitize_identifier(msg.name)}"
-            def fq_enum_name(enum):
-                ns = getattr(enum, 'namespace', None)
-                ns = ns if ns is not None else ns_name_raw
-                cpp_name = self._sanitize_identifier(enum.name if not hasattr(enum, 'cpp_name') else enum.cpp_name)
-                cpp_name = cpp_name.split('::')[-1]
-                if not cpp_name.endswith('_Enum'):
-                    cpp_name += '_Enum'
-                return f"{self._sanitize_identifier(ns)}::{cpp_name}"
+        # Recursively collect all enums and messages defined in this .def file from this namespace and all sub-namespaces
+        def collect_defined_enums(ns):
+            enums = []
+            if hasattr(ns, 'enums'):
+                enums.extend([e for e in ns.enums.values() if is_defined_here(e)])
+            if hasattr(ns, 'namespaces'):
+                for subns in ns.namespaces.values():
+                    enums.extend(collect_defined_enums(subns))
+            return enums
 
-            def collect_message_recursive(msg):
-                fqname = fq_msg_name(msg)
-                if fqname in seen_msg_fqnames:
-                    return
-                messages.append(msg)
-                seen_msg_fqnames.add(fqname)
-                # Collect parent message if any
-                parent_name = getattr(msg, 'parent', None)
-                if parent_name and parent_name in model.messages:
-                    collect_message_recursive(model.messages[parent_name])
-                # Collect referenced message types in fields
-                for field in getattr(msg, 'fields', []):
-                    ref = getattr(field, 'message_reference', None)
-                    if ref and ref in model.messages:
-                        collect_message_recursive(model.messages[ref])
-                    # Collect referenced enums in fields
-                    enum_ref = getattr(field, 'enum_reference', None)
-                    if enum_ref and enum_ref in model.enums:
-                        collect_enum_recursive(model.enums[enum_ref])
+        def collect_defined_messages(ns):
+            messages = []
+            if hasattr(ns, 'messages'):
+                messages.extend([m for m in ns.messages.values() if is_defined_here(m)])
+            if hasattr(ns, 'namespaces'):
+                for subns in ns.namespaces.values():
+                    messages.extend(collect_defined_messages(subns))
+            return messages
 
-            def collect_enum_recursive(enum):
-                fqname = fq_enum_name(enum)
-                if fqname in seen_enum_fqnames:
-                    return
-                enums.append(enum)
-                seen_enum_fqnames.add(fqname)
-                # Collect parent enum if any
-                parent_name = getattr(enum, 'parent', None)
-                if parent_name and parent_name in model.enums:
-                    collect_enum_recursive(model.enums[parent_name])
+        enums = collect_defined_enums(ns)
+        messages = collect_defined_messages(ns)
 
-
-
-
-        # --- PATCH: Robust logic to include all messages/enums for file-level and named namespaces ---
-        # For file-level (global) header, include messages whose namespace matches any of: ns_name_raw, ns_name, base_filename, sanitized_ns, or is None/empty
-        sanitized_ns = self._sanitize_identifier(str(base_filename), for_namespace=True) if base_filename else None
-        def is_file_level_ns(ns):
-            return (
-                ns is None or ns == '' or
-                ns == ns_name_raw or
-                ns == ns_name or
-                ns == base_filename or
-                ns == sanitized_ns or
-                self._sanitize_identifier(str(ns), for_namespace=True) == sanitized_ns
-            )
-        if ns_name_raw is None or ns_name_raw.lower() in ("messages", "global", "") or ns_name.startswith("mw_"):
-            roots = [msg for msg in model.messages.values() if is_file_level_ns(getattr(msg, 'namespace', None))]
-            enum_roots = [enum for enum in model.enums.values() if is_file_level_ns(getattr(enum, 'namespace', None))]
-        else:
-            # Regular namespace: match by raw namespace name and ns_name
-            roots = [msg for msg in model.messages.values() if getattr(msg, 'namespace', None) in (ns_name_raw, ns_name)]
-            enum_roots = [enum for enum in model.enums.values() if getattr(enum, 'namespace', None) in (ns_name_raw, ns_name)]
-
-        for msg in roots:
-            collect_message_recursive(msg)
-        for enum in enum_roots:
-            collect_enum_recursive(enum)
-
-        # Also add any directly attached to the namespace object (for compatibility)
-        for enum in getattr(ns, 'enums', {}).values():
-            fqname = fq_enum_name(enum)
-            if fqname not in {fq_enum_name(e) for e in enums}:
-                enums.append(enum)
-        for msg in getattr(ns, 'messages', {}).values():
-            fqname = fq_msg_name(msg)
-            if fqname not in {fq_msg_name(m) for m in messages}:
-                messages.append(msg)
-
-        # Sort enums by name for deterministic output
+        # Sort for deterministic output
         enums.sort(key=lambda e: e.name)
+        messages.sort(key=lambda m: m.name)
 
-        # Always emit all messages whose 'namespace' matches the sanitized namespace for this header
-        print(f"[GENERATOR DEBUG] All messages collected for ns '{ns_name_raw}':")
-        for m in messages:
-            parent = getattr(m, 'parent', None)
-            print(f"  - name: {m.name}, namespace: {getattr(m, 'namespace', None)}, parent: {parent}")
-        # DEBUG: Print all model messages and their namespaces for diagnosis
-        print(f"[GENERATOR DEBUG] All model messages:")
-        for m in getattr(model, 'messages', {}).values():
-            print(f"  - name: {m.name}, namespace: {getattr(m, 'namespace', None)}, sanitized: {self._sanitize_identifier(getattr(m, 'namespace', None))}")
-        # FIX: Include messages whose sanitized namespace matches the sanitized ns_name_raw
-        target_sanitized_ns = self._sanitize_identifier(ns_name_raw)
-        messages_in_ns = [m for m in messages if self._sanitize_identifier(getattr(m, 'namespace', None)) == target_sanitized_ns]
-        print(f"[GENERATOR DEBUG] messages_in_ns for ns '{ns_name_raw}': {[m.name for m in messages_in_ns]}")
+        # Emit enums
+        for enum in enums:
+            enum_cpp_name = self._sanitize_identifier(enum.name if not hasattr(enum, 'cpp_name') else enum.cpp_name)
+            enum_cpp_name = enum_cpp_name.split('::')[-1]
+            if not enum_cpp_name.endswith('_Enum'):
+                enum_cpp_name += '_Enum'
+            fq_enum_name = f"{ns_name}::{enum_cpp_name}"
+            if fq_enum_name not in emitted_enum_names:
+                decls.append(self._generate_enum_full(enum, indent="    ", fully_qualify=True, ns_prefix=ns_name))
+                emitted_enum_names.add(fq_enum_name)
+
+        # Topologically sort messages so base classes come before derived classes
+        def topo_sort_messages(msgs):
+            name_to_msg = {self._sanitize_identifier(m.name): m for m in msgs}
+            visited = set()
+            result = []
+            def visit(m):
+                name = self._sanitize_identifier(m.name)
+                if name in visited:
+                    return
+                parent_name = getattr(m, 'parent', None)
+                if parent_name and parent_name in name_to_msg:
+                    visit(name_to_msg[parent_name])
+                visited.add(name)
+                result.append(m)
+            for m in msgs:
+                visit(m)
+            return result
+        messages_sorted = topo_sort_messages(messages)
+        for msg in messages_sorted:
+            msg_cpp_name = self._sanitize_identifier(msg.name)
+            msg_ns = self._sanitize_identifier(getattr(msg, 'namespace', None))
+            fq_msg_name = f"{msg_ns}::{msg_cpp_name}"
+            if fq_msg_name not in emitted_struct_names:
+                self.import_map = import_map
+                decls.append(self._generate_message_struct(msg, ns_name, indent="    ", effective_ns=ns_name, fully_qualify=True, ns_prefix=ns_name))
+                emitted_struct_names.add(fq_msg_name)
+
+        return "\n\n".join(decls)
 
     def _is_imported_message(self, msg, import_map, ns_name_raw, ns_name):
         """
@@ -966,144 +873,21 @@ class CppGeneratorStd23(CppGeneratorBase):
                 decls.append(self._generate_message_struct(msg, msg_ns, indent="    ", effective_ns=msg_ns))
                 emitted_struct_names.add(fq_msg_name)
                 
+        # Ensure messages_in_ns and enums_in_ns are always defined for comments/footer
+        if 'messages_in_ns' not in locals():
+            messages_in_ns = []
+        if 'enums_in_ns' not in locals():
+            enums_in_ns = []
         decls_str = '\n\n'.join(decls)
         msg_comment = f"// Messages: {', '.join(sorted([m.name for m in messages_in_ns]))}" if messages_in_ns else "// Messages: (none)"
         enum_comment = f"// Enums: {', '.join(sorted([e.name for e in enums_in_ns]))}" if enums_in_ns else "// Enums: (none)"
         def_comment = f"// Source .def file: {def_path}" if def_path else "// Source .def file: (unknown)"
+        # Patch: define includes as in generate_header
+        includes = "#include <string>\n#include <vector>\n#include <map>\n#include <memory>\n#include <cstdint>"
+        if hasattr(self, '_last_needed_headers') and self._last_needed_headers:
+            for inc in sorted(self._last_needed_headers):
+                includes += f"\n#include \"{inc}\""
         return f"// Auto-generated C++23 header for namespace {ns_name}\n{def_comment}\n#pragma once\n\n{includes}\n\nnamespace {ns_name} {{\n{decls_str}\n}} // namespace {ns_name}\n"
-        # Get both comment and description for the message
-        msg_description = getattr(msg, 'description', None)
-        msg_comment = getattr(msg, 'comment', None)
-        # Use description if available, fall back to comment
-        # If the description or comment is already a Doxygen comment (starts with ///), use it directly
-        if msg_description and isinstance(msg_description, str) and "///" in msg_description:
-            doc = self._doc_comment(msg_description, indent)
-        elif msg_description:
-            doc = self._doc_comment(msg_description, indent)
-        elif msg_comment and isinstance(msg_comment, str) and "///" in msg_comment:
-            doc = self._doc_comment(msg_comment, indent)
-        elif msg_comment:
-            doc = self._doc_comment(msg_comment, indent)
-        else:
-            doc = ""
-        
-        name = self._sanitize_identifier(msg.name)
-        parent = ""
-        if getattr(msg, 'parent', None):
-            model = getattr(self, 'model', None)
-            parent_obj = None
-            parent_ns = None
-            
-            if model:
-                # First try to get the parent directly
-                parent_obj = model.messages.get(msg.parent)
-                
-                # If not found, handle namespace qualification
-                if not parent_obj and '::' in msg.parent:
-                    ns_alias, unqualified = msg.parent.split('::', 1)
-                    # Try to find in the imported namespace
-                    parent_obj = model.messages.get(unqualified)
-                    if parent_obj:
-                        parent_ns = ns_alias
-                        
-                    # Check if the parent is in a nested namespace
-                    if not parent_obj:
-                        for _, nested_ns in getattr(model, 'namespaces', {}).items():
-                            if unqualified in getattr(nested_ns, 'messages', {}):
-                                parent_obj = nested_ns.messages[unqualified]
-                                parent_ns = ns_alias
-                                break
-                else:
-                    parent_ns = getattr(parent_obj, 'namespace', None) if parent_obj else None
-                    
-                # If still not found, check namespaces
-                if not parent_obj:
-                    for ns_name, ns_obj in getattr(model, 'namespaces', {}).items():
-                        parent_msgs = getattr(ns_obj, 'messages', {})
-                        if msg.parent in parent_msgs:
-                            parent_obj = parent_msgs[msg.parent]
-                            parent_ns = ns_name
-                            break
-            
-            # Create the parent reference with appropriate namespace qualification
-            if parent_obj:
-                if parent_ns and parent_ns != ns_name:
-                    parent = f" : public {self._sanitize_identifier(parent_ns)}::{self._sanitize_identifier(parent_obj.name)}"
-                else:
-                    parent = f" : public {self._sanitize_identifier(parent_obj.name)}"
-            else:
-                # If we can't find the parent object, use the raw parent reference
-                if '::' in msg.parent:
-                    # For references like Base::Command, preserve the namespace qualification
-                    parent = f" : public {msg.parent}"
-                else:
-                    parent = f" : public {msg.parent}"
-        
-        fields = []
-        for field in getattr(msg, 'fields', []):
-            # Get both comment and description for the field
-            field_description = getattr(field, 'description', None)
-            field_comment = getattr(field, 'comment', None)
-            # Use description if available, fall back to comment
-            field_doc_text = field_description if field_description else field_comment
-            doc = self._doc_comment(field_doc_text, indent + "    ")
-            
-            t = self._cpp_field_type(field, msg, effective_ns=effective_ns or ns_name)
-            fname = self._sanitize_identifier(field.name)
-            default = self._default_value(field)
-            opt = " // optional" if getattr(field, 'optional', False) else ""
-            # Remove any message name prefix from the type if it matches the current message
-            # This handles cases where a field type might have been prefixed with the message name 
-            # during type resolution, but when used in the message we want to use the "clean" name.
-            msg_name = self._sanitize_identifier(msg.name)
-            if t.startswith(f"{msg_name}_") and "_Enum" in t:
-                # Check if this is a reference to an enum with format MessageName_field_Enum
-                # If so, use the clean field_Enum name to avoid unnecessary qualification
-                parts = t.split("_")
-                if len(parts) > 2 and parts[-1] == "Enum":
-                    # The enum might be MessageName_field_Enum or MessageName_nested_field_Enum
-                    # Either way, we want to reference it without the message prefix
-                    enum_field_name = "_".join(parts[1:])
-                    t = enum_field_name
-            if default:
-                fields.append(f"{doc}\n{indent}    {t} {fname} = {default};{opt}")
-            else:
-                fields.append(f"{doc}\n{indent}    {t} {fname};{opt}")
-        fields_str = '\n'.join(fields)
-        # Nested enums and using aliases
-        nested_enum_strs = []
-        using_aliases = []
-        for enum in nested_enums:
-            # Generate the nested enum
-            nested_enum_code = self._generate_enum_full(enum, indent=indent + "    ", nested=True)
-            nested_enum_strs.append(nested_enum_code)
-            # Determine the alias name and the nested enum type name
-            raw_name = enum.name
-            if '::' in raw_name:
-                parts = raw_name.split('::')
-                if len(parts) == 2:
-                    field_name = self._sanitize_identifier(parts[1])
-                else:
-                    field_name = self._sanitize_identifier(raw_name.replace('::', '_'))
-            else:
-                field_name = self._sanitize_identifier(raw_name)
-            # If field name already ends with '_Enum', don't duplicate it
-            if field_name.endswith("_Enum"):
-                alias_name = field_name
-                nested_enum_type = field_name
-            else:
-                alias_name = f"{field_name}_Enum"
-                nested_enum_type = f"{field_name}_Enum"
-            # The _generate_enum_full checks if the name already ends with _Enum before appending it
-            # The alias should match the enum type name to provide a clean API
-            using_aliases.append(f"{indent}    using {alias_name} = {nested_enum_type};")
-        nested_enums_block = ''
-        if nested_enum_strs:
-            nested_enums_block = '\n' + '\n'.join(nested_enum_strs)
-        using_aliases_block = ''
-        if using_aliases:
-            using_aliases_block = '\n' + '\n'.join(using_aliases)
-        return f"{doc}\n{indent}struct {name}{parent}\n{indent}{{{nested_enums_block}{using_aliases_block}\n{fields_str}\n{indent}}};"
 
     def _generate_namespace_source(self, ns, def_path=None):
         ns_name_raw = ns.name if hasattr(ns, 'name') else 'messages'
@@ -1143,14 +927,11 @@ class CppGeneratorStd23(CppGeneratorBase):
             # Phase 1: collect all roots in this namespace
             roots = [msg for msg in model.messages.values() if getattr(msg, 'namespace', None) == ns_name_raw]
             enum_roots = [enum for enum in model.enums.values() if getattr(enum, 'namespace', None) == ns_name_raw]
-            # Also collect all root-level (global) messages/enums (namespace is None or empty string)
-            global_msg_roots = [msg for msg in model.messages.values() if not getattr(msg, 'namespace', None)]
-            global_enum_roots = [enum for enum in model.enums.values() if not getattr(enum, 'namespace', None)]
 
-            # Phase 2: recursively collect all reachable messages/enums regardless of their namespace
-            for msg in roots + global_msg_roots:
+            # Phase 2: recursively collect all reachable messages/enums
+            for msg in roots:
                 collect_message_recursive(msg)
-            for enum in enum_roots + global_enum_roots:
+            for enum in enum_roots:
                 collect_enum_recursive(enum)
 
             # Also add any directly attached to the namespace object (for compatibility)
@@ -1176,27 +957,29 @@ class CppGeneratorStd23(CppGeneratorBase):
         enums.sort(key=lambda e: e.name)
         messages.sort(key=lambda m: m.name)
 
-        # Emit all enums/messages in the model, regardless of their original namespace
+        # Emit all enums/messages for this namespace: include both recursively collected and directly attached
+        # (Move emission block after messages_in_ns is defined and sorted)
         decls = []
-        if model:
-            # Sort for deterministic output
-            all_enums = sorted(model.enums.values(), key=lambda e: e.name)
-            all_msgs = sorted(model.messages.values(), key=lambda m: m.name)
-            for enum in all_enums:
-                decls.append(self._generate_enum_full(enum, indent="    "))
-            for msg in all_msgs:
-                decls.append(self._generate_message_struct(msg, ns_name, indent="    "))
-        else:
-            for enum in enums:
-                decls.append(self._generate_enum_full(enum, indent="    "))
-            for msg in messages:
-                decls.append(self._generate_message_struct(msg, ns_name, indent="    "))
+        target_sanitized_ns = self._sanitize_identifier(ns_name)
+        # Enums: union of enums_in_ns and ns.enums.values()
+        enums_in_ns = [e for e in enums if self._sanitize_identifier(getattr(e, 'namespace', None)) == target_sanitized_ns]
+        direct_enums = [e for e in getattr(ns, 'enums', {}).values() if self._sanitize_identifier(getattr(e, 'namespace', None)) == target_sanitized_ns]
+        all_enums_to_emit = {e.name: e for e in enums_in_ns + direct_enums}.values()
+
+        # Messages: union of messages_in_ns and ns.messages.values()
+        messages_in_ns = [m for m in messages if self._sanitize_identifier(getattr(m, 'namespace', None)) == target_sanitized_ns]
+        direct_msgs = [m for m in getattr(ns, 'messages', {}).values() if self._sanitize_identifier(getattr(m, 'namespace', None)) == target_sanitized_ns]
+        all_msgs_to_emit = {m.name: m for m in list(messages_in_ns) + direct_msgs}.values()
+        for enum in all_enums_to_emit:
+            decls.append(self._generate_enum_full(enum, indent="    "))
+        for msg in all_msgs_to_emit:
+            decls.append(self._generate_message_struct(msg, ns_name, indent="    "))
         decls_str = '\n\n'.join(decls)
 
-        msg_comment = f"// Messages: {', '.join(sorted([m.name for m in messages]))}" if messages else "// Messages: (none)"
-        enum_comment = f"// Enums: {', '.join(sorted([e.name for e in enums]))}" if enums else "// Enums: (none)"
+        msg_comment = f"// Messages: {', '.join(sorted([m.name for m in all_msgs_to_emit]))}" if all_msgs_to_emit else "// Messages: (none)"
+        enum_comment = f"// Enums: {', '.join(sorted([e.name for e in all_enums_to_emit]))}" if all_enums_to_emit else "// Enums: (none)"
         def_comment = f"// Source .def file: {def_path}" if def_path else "// Source .def file: (unknown)"
-        return f"// Auto-generated C++23 source for namespace {ns_name}\n{def_comment}\n#include \"{ns_name}_std23.h\"\n\n{msg_comment}\n{enum_comment}\n\nnamespace {ns_name} {{\n{decls_str}\n}} // namespace {ns_name}\n"
+        return f"// Auto-generated C++23 header for namespace {ns_name}\n{def_comment}\n#pragma once\n\nnamespace {ns_name} {{\n{decls_str}\n}} // namespace {ns_name}\n"
 
     def _cpp_field_type(self, field, parent_msg, effective_ns=None):
         """
@@ -1399,10 +1182,10 @@ class CppGeneratorStd23(CppGeneratorBase):
 
         model = getattr(self, 'model', None)
         # Try to resolve enums (top-level and nested)
-
         if model:
-            # Top-level enums
             enums = getattr(model, 'enums', {})
+            messages = getattr(model, 'messages', {})
+            # Try direct lookup
             if type_name in enums:
                 enum_obj = enums[type_name]
                 enum_ns = getattr(enum_obj, 'namespace', None)
@@ -1415,8 +1198,6 @@ class CppGeneratorStd23(CppGeneratorBase):
                         return f"{self._sanitize_identifier(enum_ns)}::{enum_name}" if enum_ns else enum_name
                 else:
                     return enum_name
-            # Top-level messages
-            messages = getattr(model, 'messages', {})
             if type_name in messages:
                 msg_obj = messages[type_name]
                 msg_ns = getattr(msg_obj, 'namespace', None)
@@ -1428,6 +1209,30 @@ class CppGeneratorStd23(CppGeneratorBase):
                         return f"{self._sanitize_identifier(msg_ns)}::{msg_name}" if msg_ns else msg_name
                 else:
                     return msg_name
+            # Try lookup by short name (for messages/enums defined at top level or in current namespace)
+            for key, msg_obj in messages.items():
+                if getattr(msg_obj, 'name', None) == type_name:
+                    msg_ns = getattr(msg_obj, 'namespace', None)
+                    msg_name = self._sanitize_identifier(msg_obj.name)
+                    if effective_ns is not None:
+                        if msg_ns == effective_ns:
+                            return msg_name
+                        else:
+                            return f"{self._sanitize_identifier(msg_ns)}::{msg_name}" if msg_ns else msg_name
+                    else:
+                        return msg_name
+            for key, enum_obj in enums.items():
+                if getattr(enum_obj, 'name', None) == type_name:
+                    enum_ns = getattr(enum_obj, 'namespace', None)
+                    sanitized_name = self._sanitize_identifier(enum_obj.name)
+                    enum_name = sanitized_name if sanitized_name.endswith("_Enum") else sanitized_name + "_Enum"
+                    if effective_ns is not None:
+                        if enum_ns == effective_ns:
+                            return enum_name
+                        else:
+                            return f"{self._sanitize_identifier(enum_ns)}::{enum_name}" if enum_ns else enum_name
+                    else:
+                        return enum_name
             # Namespaced enums/messages (Namespace.Type or Namespace::Type)
             if ('.' in str(type_name)) or ('::' in str(type_name)):
                 if '.' in str(type_name):
@@ -1444,6 +1249,17 @@ class CppGeneratorStd23(CppGeneratorBase):
                     ns_msgs = getattr(ns_obj, 'messages', {})
                     if type_part in ns_msgs:
                         return f"{self._sanitize_identifier(ns_part)}::{self._sanitize_identifier(type_part)}"
+            # Try to resolve in imports if not found in current model
+            import_map = getattr(self, 'import_map', None)
+            ns, kind = self._find_type_in_imports(type_name, import_map)
+            if ns:
+                sanitized_ns = self._sanitize_identifier(ns)
+                sanitized_name = self._sanitize_identifier(type_name)
+                if kind == 'enum':
+                    enum_name = sanitized_name if sanitized_name.endswith("_Enum") else sanitized_name + "_Enum"
+                    return f"{sanitized_ns}::{enum_name}"
+                else:
+                    return f"{sanitized_ns}::{sanitized_name}"
             # Nested enums (field enums)
             if field is not None and hasattr(field, 'enum') and getattr(field, 'enum', None):
                 msg_name = self._sanitize_identifier(getattr(parent_msg, 'name', parent_msg) if parent_msg else 'Message')
@@ -1518,6 +1334,8 @@ class CppGeneratorStd23(CppGeneratorBase):
                 return fieldtype_to_cpp[field_type_str]
         # Fallback: in a closed type system, this should never happen
         raise RuntimeError(f"[CppGeneratorStd23] Could not resolve C++ type for type_name '{type_name}' (field='{getattr(field, 'name', None)}', parent_msg='{getattr(parent_msg, 'name', None)}')")
+
+    def _doc_comment(self, comment, indent="    "):
         """Generate a formatted Doxygen-style comment from the provided comment text."""
         if not comment:
             return ""
@@ -1588,9 +1406,8 @@ class CppGeneratorStd23(CppGeneratorBase):
         # But don't append it if the name already ends with '_Enum'
         sanitized_name = self._sanitize_identifier(flat_name)
         name = sanitized_name if sanitized_name.endswith("_Enum") else sanitized_name + "_Enum"
-        # Patch: for fully qualified emission, prefix enum name
-        if fully_qualify and ns_prefix:
-            name = f"{ns_prefix}::{name}"
+        # Always use unqualified name for enum declaration inside the namespace
+        # (do not prefix with namespace)
         
         # Get both comment and description for the enum
         enum_description = getattr(enum, 'description', None)

@@ -49,6 +49,7 @@ class Namespace:
         self.messages: Dict[str, Message] = {}
 
 
+
 class EnumValue:
     """Represents a value in an enumeration."""
 

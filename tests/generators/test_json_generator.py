@@ -3,7 +3,7 @@ import json
 import glob
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 from generators.json_generator import generate_json_schema
 
 try:
@@ -29,7 +29,7 @@ def test_json_schema_generation_and_validation(def_path):
     with open(def_path, "r", encoding="utf-8") as f:
         dsl = f.read()
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = _build_model_from_lark_tree(tree)
     schema = generate_json_schema(model)
     # Validate the generated schema itself
     jsonschema.Draft7Validator.check_schema(schema)

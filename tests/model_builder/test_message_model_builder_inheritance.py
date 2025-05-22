@@ -1,6 +1,6 @@
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_lark_tree
+from message_model_builder import _build_model_from_lark_tree
 
 def test_message_inheritance_sets_parent():
     dsl = '''
@@ -10,7 +10,7 @@ def test_message_inheritance_sets_parent():
     message MainMessage : Base::BaseMessage { mainField: string }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree, "test")
+    model = _build_model_from_lark_tree(tree, "test")
     # MainMessage should have parent 'Base::BaseMessage'
     msg = model.messages.get('test::MainMessage')
     assert msg is not None, 'test::MainMessage not found in model.messages'
