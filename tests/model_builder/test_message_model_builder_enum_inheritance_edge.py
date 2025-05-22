@@ -12,7 +12,7 @@ def test_enum_inheritance_chain():
     enum C : B { Z = 3 }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     a = model.get_enum("A")
     b = model.get_enum("B")
     c = model.get_enum("C")
@@ -31,7 +31,7 @@ def test_enum_inheritance_with_qualified_parent():
     enum Child : Foo::Base { B }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     base = model.get_enum("Foo::Base")
     child = model.get_enum("Child")
     assert base is not None and child is not None
@@ -45,7 +45,7 @@ def test_enum_inheritance_with_dot_qualified_parent():
     enum Inner : Outer.Base { B }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     outer = model.get_enum("Outer")
     inner = model.get_enum("Inner")
     assert outer is not None and inner is not None

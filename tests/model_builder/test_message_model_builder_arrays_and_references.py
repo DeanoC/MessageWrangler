@@ -33,7 +33,7 @@ def test_model_arrays_and_references():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     # Check array fields
     arr_msg = model.get_message("WithArrays")
     assert arr_msg is not None

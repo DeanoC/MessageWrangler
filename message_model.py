@@ -165,6 +165,10 @@ class Field:
         self.source_file = source_file
         self.line_number = line_number
         self.type_name = type_name
+
+        # --- PATCH: Add enum_type and options_type for generator compatibility ---
+        self.enum_type = None  # Name of the enum type for enum fields
+        self.options_type = None  # Name of the options type for options fields
         self.enum = None  # Resolved enum object
 
         self.modifiers = modifiers if modifiers is not None else []

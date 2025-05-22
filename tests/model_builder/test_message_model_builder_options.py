@@ -17,7 +17,7 @@ def test_options_def_basic():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     # Should be able to retrieve options by name
     opts = getattr(model, 'options', None)
     assert opts is not None
@@ -39,7 +39,7 @@ def test_options_def_with_namespace():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
     bar = opts.get("Foo::Bar")

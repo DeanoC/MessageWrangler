@@ -10,10 +10,11 @@ def test_options_def_empty():
     options EmptyOptions { }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
-    empty = opts.get("EmptyOptions")
+    # Always use the fully qualified name for options (global: just name, namespaced: Namespace::Name)
+    empty = opts.get("EmptyOptions")  # Global options: no namespace
     assert empty is not None
     assert empty['values'] == []
 
@@ -26,10 +27,10 @@ def test_options_def_with_comments_only():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
-    only = opts.get("OnlyComments")
+    only = opts.get("OnlyComments")  # Global options: no namespace
     assert only is not None
     assert only['values'] == []
     assert only['description'].strip().startswith("/// Option set with only comments")
@@ -42,10 +43,10 @@ def test_options_def_with_trailing_comma():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
-    trailing = opts.get("TrailingComma")
+    trailing = opts.get("TrailingComma")  # Global options: no namespace
     assert trailing is not None
     assert [v['name'] for v in trailing['values']] == ["X", "Y"]
     assert [v['value'] for v in trailing['values']] == [1, 2]
@@ -61,10 +62,10 @@ def test_options_def_with_interleaved_comments():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
-    inter = opts.get("Interleaved")
+    inter = opts.get("Interleaved")  # Global options: no namespace
     assert inter is not None
     assert [v['name'] for v in inter['values']] == ["A", "B"]
     assert [v['value'] for v in inter['values']] == [10, 20]
@@ -84,10 +85,10 @@ def test_options_def_with_namespace_and_comments():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     opts = getattr(model, 'options', None)
     assert opts is not None
-    nsopts = opts.get("Edge::NSOptions")
+    nsopts = opts.get("Edge::NSOptions")  # Namespaced options: Namespace::Name
     assert nsopts is not None
     assert [v['name'] for v in nsopts['values']] == ["X", "Y"]
     assert [v['value'] for v in nsopts['values']] == [1, 2]

@@ -16,7 +16,7 @@ def test_enum_inheritance_simple():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     base = model.get_enum("BaseEnum")
     child = model.get_enum("ChildEnum")
     assert base is not None
@@ -33,7 +33,7 @@ def test_enum_inheritance_with_namespace():
     }
     '''
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     parent = model.get_enum("Foo::Parent")
     sub = model.get_enum("Foo::Sub")
     assert parent is not None

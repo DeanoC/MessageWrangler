@@ -10,7 +10,7 @@ def test_compound_field_no_components():
     }
     """
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Test")
     field = msg.fields[0]
     assert field.field_type.name == "COMPOUND"
@@ -25,7 +25,7 @@ def test_compound_field_duplicate_components():
     }
     """
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Test")
     field = msg.fields[0]
     assert field.field_type.name == "COMPOUND"
@@ -40,7 +40,7 @@ def test_compound_field_unusual_base_type():
     }
     """
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Test")
     field = msg.fields[0]
     assert field.field_type.name == "COMPOUND"
@@ -56,7 +56,7 @@ def test_compound_field_with_comments_and_whitespace():
     }
     """
     tree = parse_message_dsl(dsl)
-    model = build_model_from_lark_tree(tree)
+    model = build_model_from_lark_tree(tree, "test")
     msg = model.get_message("Test")
     field = msg.fields[0]
     assert field.field_type.name == "COMPOUND"
