@@ -20,10 +20,13 @@ class QfnReferenceTransform(EarlyTransform):
 
         def build_lookup(ns: EarlyNamespace, prefix: List[str], lookup: Dict[str, str]):
             ns_qfn = '::'.join(prefix + [ns.name]) if ns.name else '::'.join(prefix)
+            ns.qfn = ns_qfn if ns_qfn else ns.name  # Assign qfn to namespace
             for msg in ns.messages:
-                lookup[msg.name] = ns_qfn + '::' + msg.name if ns_qfn else msg.name
+                msg.qfn = ns_qfn + '::' + msg.name if ns_qfn else msg.name
+                lookup[msg.name] = msg.qfn
             for enum in ns.enums:
-                lookup[enum.name] = ns_qfn + '::' + enum.name if ns_qfn else enum.name
+                enum.qfn = ns_qfn + '::' + enum.name if ns_qfn else enum.name
+                lookup[enum.name] = enum.qfn
             for nested in ns.namespaces:
                 build_lookup(nested, prefix + [ns.name] if ns.name else prefix, lookup)
 
@@ -42,6 +45,8 @@ class QfnReferenceTransform(EarlyTransform):
                 import_ns_name = import_ns.name
                 import_lookup = {}
                 build_lookup(import_ns, [], import_lookup)
+                # DEBUG: Print the file-level namespace and QFN keys for each import
+                print(f"[DEBUG] QfnReferenceTransform: Import '{import_path}' file-level namespace: '{import_ns_name}' QFN keys: {list(import_lookup.keys())}")
                 import_lookups[import_ns_name] = import_lookup
 
         # Build lookups for aliased imports (file-level namespace only, must use alias)
@@ -52,17 +57,24 @@ class QfnReferenceTransform(EarlyTransform):
             imported_model = model.imports.get(alias)
             if imported_model and imported_model.namespaces:
                 import_ns = imported_model.namespaces[0]
-                import_lookup = {}
-                build_lookup(import_ns, [], import_lookup)
-                # Rewrite QFNs to use the alias as the file-level namespace
-                rewritten_lookup = {}
-                for k, v in import_lookup.items():
-                    parts = v.split('::', 1)
-                    if len(parts) == 2:
-                        rewritten_lookup[k] = alias + '::' + parts[1]
+                # Build a local QFN lookup rooted at the alias, without mutating the imported model
+                def build_lookup_with_alias(ns, prefix, lookup):
+                    # Replace the file-level namespace with the alias at the root
+                    if not prefix:
+                        ns_qfn = alias
                     else:
-                        rewritten_lookup[k] = alias + '::' + v
-                alias_lookups[alias] = rewritten_lookup
+                        ns_qfn = '::'.join(prefix + [ns.name]) if ns.name else '::'.join(prefix)
+                    for msg in ns.messages:
+                        msg_qfn = ns_qfn + '::' + msg.name if ns_qfn else msg.name
+                        lookup[msg.name] = msg_qfn
+                    for enum in ns.enums:
+                        enum_qfn = ns_qfn + '::' + enum.name if ns_qfn else enum.name
+                        lookup[enum.name] = enum_qfn
+                    for nested in ns.namespaces:
+                        build_lookup_with_alias(nested, prefix + [ns_qfn] if ns_qfn else prefix, lookup)
+                import_lookup = {}
+                build_lookup_with_alias(import_ns, [], import_lookup)
+                alias_lookups[alias] = import_lookup
 
         def resolve_unqualified(name: str, ns_stack: List[EarlyNamespace]) -> Optional[str]:
             # 1. Current namespace, then parent namespaces
@@ -95,14 +107,50 @@ class QfnReferenceTransform(EarlyTransform):
             return None
 
         def update_fields(fields, ns_stack):
+            primitives = {"int", "string", "bool", "float", "double"}
             for field in fields:
+                # Main type_name
                 if hasattr(field, 'type_name') and field.type_name:
-                    if _is_qualified(field.type_name):
-                        qfn = resolve_qualified(field.type_name)
-                    else:
-                        qfn = resolve_unqualified(field.type_name, ns_stack)
-                    if qfn:
-                        field.type_name = qfn
+                    # Special case: if type_name is '?' and element_type_raw is a primitive, set type_name to element_type_raw
+                    if field.type_name == '?' and hasattr(field, 'element_type_raw') and field.element_type_raw in primitives:
+                        field.type_name = field.element_type_raw
+                    elif field.type_name not in primitives:
+                        if _is_qualified(field.type_name):
+                            qfn = resolve_qualified(field.type_name)
+                        else:
+                            qfn = resolve_unqualified(field.type_name, ns_stack)
+                        if qfn:
+                            field.type_name = qfn
+                # Array element type
+                if hasattr(field, 'element_type_raw') and field.element_type_raw:
+                    if field.element_type_raw not in primitives:
+                        if _is_qualified(field.element_type_raw):
+                            qfn = resolve_qualified(field.element_type_raw)
+                        else:
+                            qfn = resolve_unqualified(field.element_type_raw, ns_stack)
+                        if qfn:
+                            field.element_type_raw = qfn
+                    # For arrays of non-primitives, always set type_name to element_type_raw (now QFN)
+                    if field.element_type_raw not in primitives and hasattr(field, 'type_name'):
+                        field.type_name = field.element_type_raw
+                # Map key type
+                if hasattr(field, 'map_key_type_raw') and field.map_key_type_raw:
+                    if field.map_key_type_raw not in primitives:
+                        if _is_qualified(field.map_key_type_raw):
+                            qfn = resolve_qualified(field.map_key_type_raw)
+                        else:
+                            qfn = resolve_unqualified(field.map_key_type_raw, ns_stack)
+                        if qfn:
+                            field.map_key_type_raw = qfn
+                # Map value type
+                if hasattr(field, 'map_value_type_raw') and field.map_value_type_raw:
+                    if field.map_value_type_raw not in primitives:
+                        if _is_qualified(field.map_value_type_raw):
+                            qfn = resolve_qualified(field.map_value_type_raw)
+                        else:
+                            qfn = resolve_unqualified(field.map_value_type_raw, ns_stack)
+                        if qfn:
+                            field.map_value_type_raw = qfn
 
         def update_enums(enums, ns_stack):
             for enum in enums:

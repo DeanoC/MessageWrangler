@@ -1,3 +1,11 @@
+from early_model_transforms.canonicalize_colons_transform import CanonicalizeColonsTransform
+from early_model_transforms.dependency_sort import topological_sort_earlymodels
+from def_file_loader import load_def_file
+from early_transform_pipeline import run_early_transform_pipeline
+from early_model_transforms.add_file_level_namespace_transform import AddFileLevelNamespaceTransform
+from early_model_transforms.qfn_reference_transform import QfnReferenceTransform
+from early_model_transforms.attach_imported_models_transform import AttachImportedModelsTransform
+
 import os
 import random
 import string
@@ -6,6 +14,63 @@ import tempfile
 import shutil
 import sys
 
+def load_early_model_with_imports(def_file_path):
+    """
+    Recursively loads a .def file and all its imports, sorts dependencies, and runs the full EarlyTransformPipeline
+    (AddFileLevelNamespaceTransform, CanonicalizeColonsTransform, QfnReferenceTransform, AttachImportedModelsTransform)
+    in dependency order. Returns the fully transformed EarlyModel for the root file and a dict of all EarlyModels.
+    """
+    # Step 1: Recursively load all EarlyModels
+    def normalize_path(path):
+        return os.path.abspath(os.path.normpath(path))
+
+    def recursive_load(path, loaded):
+        npath = normalize_path(path)
+        if npath in loaded:
+            return
+        early_model = load_def_file(npath)
+        loaded[npath] = early_model
+        for import_path, _ in getattr(early_model, 'imports_raw', []):
+            import_file = os.path.join(os.path.dirname(npath), import_path)
+            import_file = normalize_path(import_file)
+            recursive_load(import_file, loaded)
+
+    loaded = {}
+    recursive_load(def_file_path, loaded)
+
+    # Step 2: Sort dependencies
+    sorted_models = topological_sort_earlymodels(loaded)
+    print("[DEBUG] Sorted model files:")
+    for m in sorted_models:
+        print(f"    {getattr(m, 'file', None)}")
+
+
+    # Step 3: Transform each EarlyModel in order, wrapping in alias namespace if needed
+    # Alias wrapping is not needed; aliasing is handled at reference resolution time only.
+
+    transformed = {}
+    for model in sorted_models:
+        # Build import_models for this model (already transformed)
+        import_models = {}
+        model_file = normalize_path(model.file)
+        for import_path, alias in getattr(model, 'imports_raw', []):
+            import_file = os.path.join(os.path.dirname(model_file), import_path)
+            import_file = normalize_path(import_file)
+            key = alias if alias else import_path
+            if import_file in transformed:
+                import_models[key] = transformed[import_file]
+        transforms = [
+            AddFileLevelNamespaceTransform(),
+            CanonicalizeColonsTransform(),
+            QfnReferenceTransform(),
+            AttachImportedModelsTransform(import_models)
+        ]
+        model_t = run_early_transform_pipeline(model, transforms)
+        transformed[model_file] = model_t
+
+    # Step 4: Return the transformed root EarlyModel and all transformed models
+    return transformed[normalize_path(def_file_path)], transformed
+    
 # Add the parent directory to the path so we can import the modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

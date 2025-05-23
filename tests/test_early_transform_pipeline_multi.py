@@ -3,7 +3,7 @@ from early_model_transforms.attach_imported_models_transform import AttachImport
 from early_transform_pipeline_multi import run_early_transform_pipeline_multi, EarlyTransform
 
 def make_model(name, imports_raw):
-    return EarlyModel(namespaces=[], enums=[], messages=[], standalone_options=[], standalone_compounds=[], imports_raw=imports_raw, file=name)
+    return EarlyModel(namespaces=[], enums=[], messages=[], options=[], compounds=[], imports_raw=imports_raw, file=name)
 
 class DummyTransform(EarlyTransform):
     def __init__(self):

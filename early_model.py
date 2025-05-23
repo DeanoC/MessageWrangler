@@ -67,7 +67,7 @@ class EarlyMessage:
 
 class EarlyNamespace:
    def __init__(self, name: str, messages: List[EarlyMessage], enums: List[EarlyEnum], file: str, line: int,
-                 standalone_options: List[Dict[str, Any]] = [], standalone_compounds: List[Dict[str, Any]] = [],
+                 options: List[Dict[str, Any]] = None, compounds: List[Dict[str, Any]] = None,
                  comment: str = "", doc: str = "", namespaces: List['EarlyNamespace'] = None, parent_namespace: str = None):
         self.name = name
         self.messages = messages
@@ -76,8 +76,8 @@ class EarlyNamespace:
         self.line = line
         self.comment = comment
         self.doc = doc
-        self.standalone_options = standalone_options
-        self.standalone_compounds = standalone_compounds
+        self.options = options if options is not None else []
+        self.compounds = compounds if compounds is not None else []
         self.namespaces = namespaces if namespaces is not None else []
         self.parent_namespace = parent_namespace
 
@@ -87,8 +87,8 @@ class EarlyModel:
     namespaces: List[EarlyNamespace],
     enums: List[EarlyEnum],
     messages: List[EarlyMessage], # Top-level messages
-    standalone_options: List[Dict[str, Any]], # Top-level options
-    standalone_compounds: List[Dict[str, Any]], # Top-level compounds
+    options: List[Dict[str, Any]], # Top-level options
+    compounds: List[Dict[str, Any]], # Top-level compounds
     imports_raw: List[Tuple[str, Optional[str]]], # List of (path, alias) tuples
     file: str, # The main file being parsed
     imports: dict = None # Mapping of import name to EarlyModel
@@ -97,7 +97,7 @@ class EarlyModel:
     self.enums = enums
     self.messages = messages
     self.file = file
-    self.standalone_options = standalone_options
-    self.standalone_compounds = standalone_compounds
+    self.options = options
+    self.compounds = compounds
     self.imports_raw = imports_raw
     self.imports = imports if imports is not None else {}

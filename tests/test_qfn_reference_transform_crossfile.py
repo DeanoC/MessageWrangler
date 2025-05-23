@@ -13,8 +13,8 @@ def make_model(file, messages=None, enums=None, namespaces=None, imports_raw=Non
         namespaces=namespaces or [],
         enums=enums or [],
         messages=messages or [],
-        standalone_options=[],
-        standalone_compounds=[],
+        options=[],
+        compounds=[],
         imports_raw=imports_raw or [],
         file=file,
         imports=imports or {}

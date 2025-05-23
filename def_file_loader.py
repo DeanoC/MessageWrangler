@@ -346,10 +346,15 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
         # Extract raw type info from type_def
         type_info = _extract_raw_type_info(type_def_node.children[0] if type_def_node and type_def_node.children else None)
 
-        # Patch: type_name is the type string (referenced_name_raw or raw_type), type_type is the .data (type_name)
+
         # Patch: type_name is the type string (prefer referenced_name_raw, then raw_type, then type_type)
         type_name = type_info.get('referenced_name_raw') or type_info.get('raw_type') or type_info.get('type_name', '?')
-        type_type = type_info.get('type_name', '?')
+        # If type_name is a primitive, set type_type to 'primitive', else use the current logic
+        primitives = {'int', 'float', 'string', 'bool', 'double'}
+        if type_name in primitives:
+            type_type = 'primitive'
+        else:
+            type_type = type_info.get('type_name', '?')
 
         field = EarlyField(
             name=name,
@@ -403,7 +408,7 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
         name = "?"
         line = get_line(ns_node)
         doc, comment = _extract_comments(ns_node, parent_children, node_index)
-        messages, enums, standalone_options, standalone_compounds, namespaces = [], [], [], [], []
+        messages, enums, options, compounds, namespaces = [], [], [], [], []
 
         if ns_node.children:
              name_token = ns_node.children[0]
@@ -438,9 +443,9 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
             elif subnode.data == 'enum_def':
                 enums.append(parse_enum(subnode, name, file, ns_node.children, child_idx + 1))
             elif subnode.data == 'options_def':
-                standalone_options.append(_parse_options_def(subnode, name, file, ns_node.children, child_idx + 1))
+                options.append(_parse_options_def(subnode, name, file, ns_node.children, child_idx + 1))
             elif subnode.data == 'compound_def':
-                standalone_compounds.append(_parse_compound_def(subnode, name, file, ns_node.children, child_idx + 1))
+                compounds.append(_parse_compound_def(subnode, name, file, ns_node.children, child_idx + 1))
             # Ignore 'comment' and 'import_stmt' at this level if they appear (grammar might prevent imports)
 
         # Determine parent namespace name (None if root)
@@ -454,7 +459,7 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
                         parent_ns = str(prev.children[0])
                     break
 
-        return EarlyNamespace(name, messages, enums, file, line, standalone_options=standalone_options, standalone_compounds=standalone_compounds, comment=comment, doc=doc, namespaces=namespaces, parent_namespace=parent_ns)
+        return EarlyNamespace(name, messages, enums, file, line, options=options, compounds=compounds, comment=comment, doc=doc, namespaces=namespaces, parent_namespace=parent_ns)
 
     def _parse_options_def(options_node, namespace, file, parent_children=None, node_index=None):
         name = "?"
@@ -518,8 +523,8 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
     namespaces = []
     free_messages = [] # Top-level messages
     free_enums = [] # Top-level enums
-    standalone_options = [] # Top-level options_def
-    standalone_compounds = [] # Top-level compound_def
+    options = [] # Top-level options_def
+    compounds = [] # Top-level compound_def
     imports_raw = [] # List of (path, alias) tuples
 
     # Top-level: scan for namespaces, messages, enums, options_def, compound_def, import_stmt
@@ -543,10 +548,10 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
               free_enums.append(parse_enum(subnode, ns_name, file, tree.children, idx))
           elif subnode.data == 'options_def':
               ns_name = current_processing_file_namespace
-              standalone_options.append(_parse_options_def(subnode, ns_name, file, tree.children, idx))
+              options.append(_parse_options_def(subnode, ns_name, file, tree.children, idx))
           elif subnode.data == 'compound_def':
               ns_name = current_processing_file_namespace
-              standalone_compounds.append(_parse_compound_def(subnode, ns_name, file, tree.children, idx))
+              compounds.append(_parse_compound_def(subnode, ns_name, file, tree.children, idx))
           elif subnode.data == 'import_stmt':
               path = None
               alias = None
@@ -560,7 +565,7 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
           # Ignore 'comment' at this level
 
     # The EarlyModel constructor needs to be updated to accept the new lists
-    return EarlyModel(namespaces, free_enums, free_messages, standalone_options, standalone_compounds, imports_raw, file)
+    return EarlyModel(namespaces, free_enums, free_messages, options, compounds, imports_raw, file)
 
 
 # Place this at the end of the file, after all helper functions (including process_node)
@@ -1530,7 +1535,7 @@ def build_model_from_file_recursive(main_file_path: str, already_loaded=None) ->
         imported_model = build_model_from_file_recursive(import_file, already_loaded)
         # --- PATCH: Track imports in the model ---
         if hasattr(model, 'imports'):
-            model.imports[import_alias] = import_file
+            model.imports[import_alias] = imported_model
         # Merge imported namespaces/messages into the main model under the alias
         for ns_name, ns_obj in imported_model.namespaces.items():
             # Always set the namespace of all messages/enums to the alias

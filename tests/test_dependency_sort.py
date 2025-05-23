@@ -3,7 +3,7 @@ from early_model import EarlyModel
 from early_model_transforms.dependency_sort import topological_sort_earlymodels, DependencyCycleError
 
 def make_model(name, imports_raw):
-    return EarlyModel(namespaces=[], enums=[], messages=[], standalone_options=[], standalone_compounds=[], imports_raw=imports_raw, file=name)
+    return EarlyModel(namespaces=[], enums=[], messages=[], options=[], compounds=[], imports_raw=imports_raw, file=name)
 
 def test_topological_sort_simple():
     a = make_model('a', [('b', None)])

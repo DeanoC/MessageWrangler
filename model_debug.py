@@ -124,7 +124,7 @@ def _print_early_message(msg_obj, indent_level, add_line_func):
     for field in getattr(msg_obj, 'fields', []):
         _print_early_field(field, indent_level + 1, add_line_func)
 
-def _print_standalone_options_list(options_list, indent_level, add_line_func, context_label="Standalone Options"):
+def _print_options_list(options_list, indent_level, add_line_func, context_label="Options"):
     ind = '  ' * indent_level
     if not options_list: return
     add_line_func(f"{ind}{context_label}:")
@@ -143,7 +143,7 @@ def _print_standalone_options_list(options_list, indent_level, add_line_func, co
             val_details_str = f" ({', '.join(val_details)})" if val_details else ""
             add_line_func(f"{value_ind}Value: {val_raw.get('name', '?')} = {val_raw.get('value', 'AUTO')}{val_details_str}")
 
-def _print_standalone_compounds_list(compounds_list, indent_level, add_line_func, context_label="Standalone Compounds"):
+def _print_compounds_list(compounds_list, indent_level, add_line_func, context_label="Compounds"):
     ind = '  ' * indent_level
     if not compounds_list: return
     add_line_func(f"{ind}{context_label}:")
@@ -179,8 +179,8 @@ def debug_print_early_model(early_model: EarlyModel, indent=0, file_path=None, o
       ns_names = [getattr(ns, 'name', '?') for ns in v_namespaces]
       add_line(f"{ind}    {k}: file='{v_file}', namespaces={ns_names}")
 
-  _print_standalone_options_list(getattr(early_model, 'standalone_options', []), indent + 1, add_line, "Top-Level Standalone Options")
-  _print_standalone_compounds_list(getattr(early_model, 'standalone_compounds', []), indent + 1, add_line, "Top-Level Standalone Compounds")
+  _print_options_list(getattr(early_model, 'options', []), indent + 1, add_line, "Top-Level Options")
+  _print_compounds_list(getattr(early_model, 'compounds', []), indent + 1, add_line, "Top-Level Compounds")
 
   top_level_enums = getattr(early_model, 'enums', [])
   if top_level_enums:
@@ -208,8 +208,8 @@ def debug_print_early_model(early_model: EarlyModel, indent=0, file_path=None, o
     ns_details_str = f" ({', '.join(ns_details)})" if ns_details else ""
     add_line(f"{ns_ind}Namespace: {getattr(ns_obj, 'name', '?')}{ns_details_str} (file='{getattr(ns_obj, 'file', '?')}', line={getattr(ns_obj, 'line', '?')}, parent_namespace={repr(parent_ns)})")
 
-    _print_standalone_options_list(getattr(ns_obj, 'standalone_options', []), indent_level + 1, add_line)
-    _print_standalone_compounds_list(getattr(ns_obj, 'standalone_compounds', []), indent_level + 1, add_line)
+    _print_options_list(getattr(ns_obj, 'standalone_options', []), indent_level + 1, add_line)
+    _print_compounds_list(getattr(ns_obj, 'standalone_compounds', []), indent_level + 1, add_line)
 
     ns_enums = getattr(ns_obj, 'enums', [])
     add_line(f"{ns_ind}    [DEBUG] enums count: {len(ns_enums)}")
@@ -248,3 +248,152 @@ def debug_print_early_model(early_model: EarlyModel, indent=0, file_path=None, o
     print(f"[DEBUG] EarlyModel pretty-printed to {file_path}")
   else:
     print(output)
+
+def debug_print_model(model, indent=0, file_path=None, out_dir="./generated/model_builder"):
+    """
+    Pretty-print a Model (concrete, generator-ready) for inspection.
+    """
+    lines = []
+    def add_line(s):
+        lines.append(s)
+
+    ind = '  ' * indent
+    add_line(f"{ind}Model (Main File: {getattr(model, 'file', '?')})")
+
+    # Print imports if present
+    imports = getattr(model, 'imports', None)
+    if imports:
+        add_line(f"{ind}  Imports (resolved):")
+        for k, v in imports.items():
+            v_file = getattr(v, 'file', '?')
+            v_namespaces = getattr(v, 'namespaces', [])
+            ns_names = [getattr(ns, 'name', '?') for ns in v_namespaces]
+            add_line(f"{ind}    {k}: file='{v_file}', namespaces={ns_names}")
+
+    # Print top-level options/compounds
+    options = getattr(model, 'options', [])
+    if options:
+        add_line(f"{ind}  Top-Level Options:")
+        for opt in options:
+            add_line(f"{ind}    {opt}")
+    compounds = getattr(model, 'compounds', [])
+    if compounds:
+        add_line(f"{ind}  Top-Level Compounds:")
+        for comp in compounds:
+            add_line(f"{ind}    {comp}")
+
+    # Print top-level enums/messages if present
+    top_level_enums = getattr(model, 'enums', [])
+    if top_level_enums:
+        add_line(f"{ind}  Top-Level Enums:")
+        for enum_obj in top_level_enums:
+            add_line(f"{ind}    Enum: {getattr(enum_obj, 'name', '?')}")
+    top_level_messages = getattr(model, 'messages', [])
+    if top_level_messages:
+        add_line(f"{ind}  Top-Level Messages:")
+        for msg_obj in top_level_messages:
+            add_line(f"{ind}    Message: {getattr(msg_obj, 'name', '?')}")
+
+    def print_enum(enum, level):
+        enum_ind = '  ' * level
+        details = []
+        if enum.parent_raw:
+            details.append(f"parent_raw='{enum.parent_raw}'")
+        details.append(f"is_open={enum.is_open}")
+        if enum.doc:
+            details.append(f"doc='{enum.doc[:30].replace('\n', ' ')}{'...' if len(enum.doc) > 30 else ''}'")
+        if enum.comment:
+            details.append(f"comment='{enum.comment[:30].replace('\n', ' ')}{'...' if len(enum.comment) > 30 else ''}'")
+        add_line(f"{enum_ind}Enum: {enum.name} ({', '.join(details)}) (file='{enum.file}', line={enum.line}, ns='{enum.namespace}')")
+        for val in enum.values:
+            val_details = [f"value={val.value}"]
+            if val.doc:
+                val_details.append(f"doc='{val.doc[:20].replace('\n', ' ')}{'...' if len(val.doc) > 20 else ''}'")
+            if val.comment:
+                val_details.append(f"comment='{val.comment[:20].replace('\n', ' ')}{'...' if len(val.comment) > 20 else ''}'")
+            add_line(f"{enum_ind}  Value: {val.name} ({', '.join(val_details)}) (file='{val.file}', line={val.line}, ns='{val.namespace}')")
+
+    def print_message(msg, level):
+        msg_ind = '  ' * level
+        details = []
+        # Print parent reference (ModelReference) if present
+        if getattr(msg, 'parent', None):
+            details.append(f"parent={repr(msg.parent)}")
+        elif getattr(msg, 'parent_raw', None):
+            details.append(f"parent_raw='{msg.parent_raw}'")
+        if msg.doc:
+            details.append(f"doc='{msg.doc[:30].replace('\n', ' ')}{'...' if len(msg.doc) > 30 else ''}'")
+        if msg.comment:
+            details.append(f"comment='{msg.comment[:30].replace('\n', ' ')}{'...' if len(msg.comment) > 30 else ''}'")
+        add_line(f"{msg_ind}Message: {msg.name}{' (' + ', '.join(details) + ')' if details else ''} (file='{msg.file}', line={msg.line}, ns='{msg.namespace}')")
+        for field in msg.fields:
+            field_details = []
+            for i, ftype in enumerate(field.field_types):
+                ref = field.type_refs[i] if i < len(field.type_refs) else None
+                tname = field.type_names[i] if i < len(field.type_names) else None
+                s = f"type[{i}]={ftype.name}"
+                if tname:
+                    s += f" (name='{tname}')"
+                if ref is not None:
+                    s += f" (ref={getattr(ref, 'name', ref)})"
+                field_details.append(s)
+            if field.modifiers:
+                field_details.append(f"modifiers={[m.name for m in field.modifiers]}")
+            if field.default is not None:
+                field_details.append(f"default={field.default}")
+            if field.inline_values:
+                field_details.append(f"inline_values=[{', '.join(f'{v.name}={v.value}' for v in field.inline_values)}]")
+            if field.doc:
+                field_details.append(f"doc='{field.doc[:30].replace('\n', ' ')}{'...' if len(field.doc) > 30 else ''}'")
+            if field.comment:
+                field_details.append(f"comment='{field.comment[:30].replace('\n', ' ')}{'...' if len(field.comment) > 30 else ''}'")
+            add_line(f"{msg_ind}  Field: {field.name} ({', '.join(field_details)}) (file='{field.file}', line={field.line}, ns='{field.namespace}')")
+
+    def print_namespace(ns, level):
+        ns_ind = '  ' * level
+        ns_details = []
+        if ns.doc:
+            ns_details.append(f"doc='{ns.doc[:30].replace('\n', ' ')}{'...' if len(ns.doc) > 30 else ''}'")
+        if ns.comment:
+            ns_details.append(f"comment='{ns.comment[:30].replace('\n', ' ')}{'...' if len(ns.comment) > 30 else ''}'")
+        ns_details_str = f" ({', '.join(ns_details)})" if ns_details else ""
+        add_line(f"{ns_ind}Namespace: {ns.name}{ns_details_str} (file='{ns.file}', line={ns.line}, parent_namespace={repr(ns.parent_namespace)})")
+
+        if ns.options:
+            add_line(f"{ns_ind}  Options:")
+            for opt in ns.options:
+                add_line(f"{ns_ind}    {opt}")
+        if ns.compounds:
+            add_line(f"{ns_ind}  Compounds:")
+            for comp in ns.compounds:
+                add_line(f"{ns_ind}    {comp}")
+
+        if ns.enums:
+            add_line(f"{ns_ind}  Enums:")
+            for enum in ns.enums:
+                print_enum(enum, level + 2)
+        if ns.messages:
+            add_line(f"{ns_ind}  Messages:")
+            for msg in ns.messages:
+                print_message(msg, level + 2)
+        if ns.namespaces:
+            add_line(f"{ns_ind}  Nested Namespaces:")
+            for n in ns.namespaces:
+                print_namespace(n, level + 1)
+
+    namespaces = getattr(model, 'namespaces', [])
+    if namespaces:
+        add_line(f"{ind}  Namespaces:")
+        for ns in namespaces:
+            print_namespace(ns, indent + 1)
+
+    output = "\n".join(lines)
+    if file_path is not None:
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(out_dir, file_path)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(output)
+        print(f"[DEBUG] Model pretty-printed to {file_path}")
+    else:
+        print(output)

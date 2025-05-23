@@ -15,7 +15,7 @@ class TestBobPrefixTransform(unittest.TestCase):
         enum_val = EarlyEnumValue(name="VAL1", value=1, file="f", namespace="ns", line=1)
         enum = EarlyEnum(name="Enum1", values=[enum_val], file="f", namespace="ns", line=1)
         ns = EarlyNamespace(name="NS1", messages=[msg], enums=[enum], file="f", line=1)
-        model = EarlyModel(namespaces=[ns], enums=[enum], messages=[msg], standalone_options=[], standalone_compounds=[], imports_raw=[], file="f")
+        model = EarlyModel(namespaces=[ns], enums=[enum], messages=[msg], options=[], compounds=[], imports_raw=[], file="f")
         return model
 
     def test_bob_prefix_transform(self):

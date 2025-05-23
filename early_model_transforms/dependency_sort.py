@@ -17,20 +17,30 @@ def topological_sort_earlymodels(models: Dict[str, EarlyModel]) -> List[EarlyMod
     temp_mark = set()
     result = []
 
+    import os
+    def normalize_path(path):
+        return os.path.abspath(os.path.normpath(path))
+
+    # Build a mapping from normalized file path to model
+    norm_models = {normalize_path(k): v for k, v in models.items()}
+
     def visit(name: str):
-        if name in visited:
+        nname = normalize_path(name)
+        if nname in visited:
             return
-        if name in temp_mark:
-            raise DependencyCycleError(f"Cycle detected involving {name}")
-        temp_mark.add(name)
-        model = models[name]
+        if nname in temp_mark:
+            raise DependencyCycleError(f"Cycle detected involving {nname}")
+        temp_mark.add(nname)
+        model = norm_models[nname]
         for dep_name, _ in model.imports_raw:
-            if dep_name in models:
-                visit(dep_name)
-        temp_mark.remove(name)
-        visited.add(name)
+            dep_file = os.path.join(os.path.dirname(nname), dep_name)
+            dep_file = normalize_path(dep_file)
+            if dep_file in norm_models:
+                visit(dep_file)
+        temp_mark.remove(nname)
+        visited.add(nname)
         result.append(model)
 
-    for name in models:
+    for name in norm_models:
         visit(name)
     return result
