@@ -6,7 +6,7 @@ import pytest
 import tempfile
 import subprocess
 from lark_parser import parse_message_dsl
-from message_model_builder import _build_model_from_lark_tree
+from def_file_loader import _build_model_from_lark_tree
 from generators.typescript_generator import generate_typescript_code
 
 # Ensure npm global bin is in PATH for tsc detection (especially in venv/IDE)

@@ -3,7 +3,7 @@ Additional tests for build_model_from_lark_tree with more complex message/enum/c
 """
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import _build_model_from_lark_tree
+from def_file_loader import _build_model_from_lark_tree
 from message_model import FieldType
 
 def test_multiple_enums_and_messages_with_comments():

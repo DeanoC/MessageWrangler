@@ -1,10 +1,13 @@
+from def_file_loader import build_model_from_file_recursive
+import re
+
 def test_cpp_generator_std23_header_filenames_integration():
     """
     Integration: Ensure all generated header files have the correct filename (not messages_std23.h except for messages.def)
     """
     import glob
     import os
-    from message_model_builder import build_model_from_file_recursive
+    from def_file_loader import build_model_from_file_recursive
     from generators.cpp_generator_std23 import CppGeneratorStd23
     all_defs = glob.glob(os.path.join("tests", "def", "*.def"))
     invalid = {
@@ -38,7 +41,7 @@ import glob
 import tempfile
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import _build_model_from_lark_tree
+from def_file_loader import _build_model_from_lark_tree
 from generators.cpp_generator_std23 import CppGeneratorStd23
 
 def get_def_files():
@@ -56,8 +59,6 @@ def test_cpp_generator_std23_source(def_path):
     # Parse and build model, instantiate generator
     with open(def_path, "r", encoding="utf-8") as f:
         dsl = f.read()
-    from message_model_builder import build_model_from_file_recursive
-    import re
     model = build_model_from_file_recursive(def_path)
     if hasattr(model, 'namespaces'):
         namespaces = list(model.namespaces.values())

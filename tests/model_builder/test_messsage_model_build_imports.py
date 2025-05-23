@@ -1,13 +1,13 @@
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import _build_model_from_lark_tree
+from def_file_loader import _build_model_from_lark_tree
 
 
 
 def test_model_builder_recursive_import_merges_namespaces_and_messages():
     # Use real .def files in tests/def/
     import os
-    from message_model_builder import build_model_from_file_recursive
+    from def_file_loader import build_model_from_file_recursive
     test_dir = os.path.join(os.path.dirname(__file__), '..', 'def')
     main_def = os.path.abspath(os.path.join(test_dir, 'main.def'))
     model = build_model_from_file_recursive(main_def)

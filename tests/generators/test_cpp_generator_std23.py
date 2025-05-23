@@ -1,3 +1,126 @@
+def test_message_inheritance_from_non_message_type_fails_model_building():
+    """
+    Tests that attempting to inherit a message from a non-existent message
+    (e.g., a C++ type name like 'int16' used in the DSL inheritance syntax)
+    causes model building to fail, as 'int16' is not a valid message reference.
+    """
+    dsl_content = """
+    namespace TestInvalidParent {
+        message MyMessage : int16 { // 'int16' is not a defined message in the DSL
+            value: int;
+        }
+    }
+    """
+    # Create a temporary .def file
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def_path = os.path.join(tmpdir, "invalid_message_parent.def")
+        with open(def_path, "w", encoding="utf-8") as f:
+            f.write(dsl_content)
+
+        # Expect a RuntimeError (or a more specific error if defined by the model builder)
+        # when it tries to resolve 'int16' as a parent message.
+        expected_error_pattern = (
+            r"Cannot resolve parent message 'int16' for message '([\w:]+::)?MyMessage'|"
+            r"Unresolved parent message 'int16' for '([\w:]+::)?MyMessage'"
+        )
+        with pytest.raises(RuntimeError, match=expected_error_pattern):
+            build_model_from_file_recursive(def_path)
+def test_cpp_generator_std23_emits_field_enum():
+    """
+    Ensure that if a message field uses an enum type (inline or referenced),
+    the generated C++ header emits the corresponding enum declaration.
+    """
+    import tempfile
+    from def_file_loader import build_model_from_file_recursive
+    from generators.cpp_generator_std23 import CppGeneratorStd23
+    # Create a .def file with a message and an inline enum field
+    dsl = '''
+namespace TestNS {
+    enum CommandType {
+        FOO = 0;
+        BAR = 1;
+    }
+    message Command {
+        type: CommandType;
+    }
+}
+'''
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def_path = os.path.join(tmpdir, "test_enum.def")
+        with open(def_path, "w", encoding="utf-8") as f:
+            f.write(dsl)
+        model = build_model_from_file_recursive(def_path)
+        model.main_file_path = def_path
+        gen = CppGeneratorStd23([model], model=model)
+        header_map = gen.generate_header()
+        # There should be only one header
+        assert len(header_map) == 1
+        header_content = list(header_map.values())[0]
+        # The header should contain the enum declaration for CommandType
+        import re
+        enum_decl = re.search(r'enum class (CommandType|CommandType_Enum)\b', header_content)
+        assert enum_decl, (
+            "Generated header does not contain the expected enum declaration for CommandType.\n" +
+            header_content
+        )
+        # The struct should use the correct enum type for the field
+        assert re.search(r'CommandType(_Enum)?\s+type;', header_content), (
+            "Struct Command does not use the expected enum type for field 'type'.\n" +
+            header_content
+        )
+def test_cpp_generator_std23_namespace_struct_name_collision():
+    """
+    Ensure that if a namespace and a struct/message have the same name (e.g., 'Base'),
+    the generated C++ code does not emit both a namespace and a struct/class with the same name,
+    which would cause a C++ compiler error (C2757).
+    """
+    import tempfile
+    from def_file_loader import build_model_from_file_recursive
+    from generators.cpp_generator_std23 import CppGeneratorStd23
+    # Create a .def file with a namespace and a message both named 'Base'
+    dsl = '''
+namespace Base {
+    message Base {
+        id: int;
+    }
+}
+'''
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def_path = os.path.join(tmpdir, "base.def")
+        with open(def_path, "w", encoding="utf-8") as f:
+            f.write(dsl)
+        model = build_model_from_file_recursive(def_path)
+        model.main_file_path = def_path
+        gen = CppGeneratorStd23([model], model=model)
+        header_map = gen.generate_header()
+        # There should be only one header
+        assert len(header_map) == 1
+        header_content = list(header_map.values())[0]
+        # The header should not contain both 'namespace Base {' and 'struct Base' at the same scope
+        # (which would cause a C++ name collision)
+        # Instead, the struct should be disambiguated (e.g., prefixed or renamed)
+        # Check for the problematic pattern:
+        import re
+        ns_match = re.search(r'namespace\s+Base\s*{', header_content)
+        struct_match = re.search(r'struct\s+Base\b', header_content)
+        assert not (ns_match and struct_match), (
+            "Generated header contains both 'namespace Base' and 'struct Base', which will cause a C++ name collision.\n" +
+            header_content
+        )
+        # Optionally, check that the struct is renamed or prefixed (e.g., 'mw_Base' or similar)
+        # Accept either no struct, or a struct with a different name
+        if ns_match:
+            # If namespace Base exists, struct Base should not exist
+            assert not struct_match, (
+                "Struct 'Base' should not be emitted inside namespace 'Base' due to name collision.\n" +
+                header_content
+            )
+        # If struct Base exists, namespace Base should not exist (should be renamed)
+        if struct_match:
+            assert not ns_match, (
+                "Namespace 'Base' should not be emitted if struct 'Base' exists at the same scope.\n" +
+                header_content
+            )
 import glob
 import os
 import pytest
@@ -14,7 +137,7 @@ def get_def_files():
 # Test: All generated header files have the correct filename (not messages_std23.h except for messages.def)
 @pytest.mark.parametrize("def_path", get_def_files())
 def test_cpp_generator_std23_header_filenames(def_path):
-    from message_model_builder import build_model_from_file_recursive
+    from def_file_loader import build_model_from_file_recursive
     from generators.cpp_generator_std23 import CppGeneratorStd23
     model = build_model_from_file_recursive(def_path)
     model.main_file_path = def_path
@@ -41,7 +164,7 @@ def test_cpp_generator_std23_no_fake_std_includes():
     """
     import tempfile
     import os
-    from message_model_builder import build_model_from_file_recursive
+    from def_file_loader import build_model_from_file_recursive
     from generators.cpp_generator_std23 import CppGeneratorStd23
     # Create a .def file with a message using only built-in types
     dsl = '''
@@ -99,7 +222,7 @@ namespace Main {
         with open(main_path, "w", encoding="utf-8") as f:
             f.write(main_def)
         # Build models
-        from message_model_builder import build_model_from_file_recursive
+        from def_file_loader import build_model_from_file_recursive
         from generators.cpp_generator_std23 import CppGeneratorStd23
         base_model = build_model_from_file_recursive(base_path)
         base_model.main_file_path = base_path
@@ -130,7 +253,7 @@ import pytest
 import re
 
 from lark_parser import parse_message_dsl
-from message_model_builder import build_model_from_file_recursive, _build_model_from_lark_tree
+from def_file_loader import build_model_from_file_recursive
 from generators.cpp_generator_std23 import CppGeneratorStd23, CppGeneratorBase
 
 
@@ -199,7 +322,7 @@ def test_cpp_generator_std23_cross_file_includes_and_references():
     Uses sh4c_comms.def (which imports sh4c_base.def) as a concrete example.
     """
     import re
-    from message_model_builder import build_model_from_file_recursive
+    from def_file_loader import build_model_from_file_recursive
     def_path = os.path.join("tests", "def", "sh4c_comms.def")
     model = build_model_from_file_recursive(def_path)
     model.main_file_path = def_path  # Ensure correct header naming
@@ -283,7 +406,7 @@ def test_cpp_generator_std23_header(def_path):
             collect_for_ns(subns, root_model)
         # Recursively collect for imports: load the full model for each import, matching the generator's logic
         if hasattr(ns, 'imports') and getattr(ns, 'imports'):
-            from message_model_builder import build_model_from_file_recursive
+            from def_file_loader import build_model_from_file_recursive
             for imported_ns, imported_path in ns.imports.items():
                 try:
                     imported_model = build_model_from_file_recursive(imported_path)
@@ -404,3 +527,106 @@ def collect_all_messages(model, seen=None):
     for imported in getattr(model, 'imports', []):
         expected_msgs.update(collect_all_messages(imported, seen))
     return expected_msgs
+
+
+def test_generate_header_with_local_enums_and_messages_pytest():
+    """
+    Tests that enums defined in a .def file are generated correctly in the C++ header
+    and are available before messages in the same file try to use them.
+    (Pytest style)
+    """
+    dsl_content = """
+    namespace TestEnumGenPytest {
+        enum MyStatus : int16 {
+            OK = 0;
+            ERROR = 1;
+        }
+
+        message StatusMessage {
+            current_status: MyStatus;
+            description: string;
+        }
+    }
+    """
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".def", encoding="utf-8", dir="./generated/cpp_std23") as tmp_def_file:
+        tmp_def_file.write(dsl_content)
+        tmp_def_file_path = tmp_def_file.name
+    
+    generated_header_content = None
+    # Derive expected header name based on your generator's convention
+    # e.g., os.path.splitext(os.path.basename(tmp_def_file_path))[0] + "_std23.h"
+    # For simplicity, let's assume a fixed part of the name if the temp name is tricky
+    # or better, derive it like in the integration test.
+    def_base_name = os.path.splitext(os.path.basename(tmp_def_file_path))[0]
+    expected_header_filename = f"{def_base_name}_std23.h" 
+
+    try:
+        model = build_model_from_file_recursive(tmp_def_file_path)
+        
+        assert hasattr(model, 'namespaces'), "Model should have namespaces attribute"
+        assert "TestEnumGenPytest" in model.namespaces, "TestEnumGenPytest namespace not found"
+        
+        namespaces_to_generate = [model.namespaces["TestEnumGenPytest"]]
+        gen = CppGeneratorStd23(namespaces_to_generate, model=model)
+        header_map = gen.generate_header()
+        
+        assert expected_header_filename in header_map, \
+            f"Expected header file '{expected_header_filename}' not found. Found: {list(header_map.keys())}"
+        generated_header_content = header_map[expected_header_filename]
+
+        # Assertions for enum and struct definitions
+        assert re.search(r"enum\s+class\s+MyStatus_Enum\s*:\s*uint8_t", generated_header_content), \
+            "MyStatus_Enum definition missing or incorrect type."
+        assert "OK = 0" in generated_header_content
+        assert "ERROR = 1" in generated_header_content
+        
+        assert "struct StatusMessage" in generated_header_content
+        assert "MyStatus_Enum current_status;" in generated_header_content
+        assert "std::string description;" in generated_header_content
+
+        # Verify namespace wrapping
+        assert "namespace TestEnumGenPytest {" in generated_header_content
+        assert generated_header_content.strip().endswith("} // namespace TestEnumGenPytest"), \
+            "Namespace not closed correctly."
+
+        # Check order: enum definition before struct usage
+        my_status_enum_def_index = generated_header_content.find("enum class MyStatus_Enum")
+        status_message_struct_def_index = generated_header_content.find("struct StatusMessage")
+
+        assert my_status_enum_def_index != -1, "MyStatus_Enum definition not found for order checking."
+        assert status_message_struct_def_index != -1, "StatusMessage definition not found for order checking."
+        assert my_status_enum_def_index < status_message_struct_def_index, \
+            "MyStatus_Enum must be defined before StatusMessage struct."
+
+    finally:
+        os.remove(tmp_def_file_path)
+
+def test_enum_inheritance_from_non_enum_type_fails_model_building():
+    """
+    Tests that attempting to inherit an enum from a non-existent enum
+    (e.g., a C++ type name like 'int16' used in the DSL inheritance syntax)
+    causes model building to fail, as 'int16' is not a valid enum reference.
+    """
+    dsl_content = """
+    namespace TestInvalidParent {
+        enum MyStatus : int16 { // 'int16' is not a defined enum in the DSL
+            OK = 0;
+            ERROR = 1;
+        }
+    }
+    """
+    # Create a temporary .def file
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def_path = os.path.join(tmpdir, "invalid_enum_parent.def")
+        with open(def_path, "w", encoding="utf-8") as f:
+            f.write(dsl_content)
+
+        # Expect a RuntimeError (or a more specific error if defined by the model builder)
+        # when it tries to resolve 'int16' as a parent enum.
+        # The regex for the error message is made somewhat flexible.
+        expected_error_pattern = (
+            r"Cannot resolve parent enum 'int16' for enum '([\w:]+::)?MyStatus'|"
+            r"Unresolved parent enum 'int16' for '([\w:]+::)?MyStatus'"
+        )
+        with pytest.raises(RuntimeError, match=expected_error_pattern):
+            build_model_from_file_recursive(def_path)

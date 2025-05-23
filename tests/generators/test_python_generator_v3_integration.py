@@ -4,7 +4,7 @@ import subprocess
 import sys
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import _build_model_from_lark_tree
+from def_file_loader import _build_model_from_lark_tree
 from generators.python_generator_v3 import generate_all_python_files
 
 def get_def_files():
@@ -30,7 +30,7 @@ def test_python_generator_v3_executes(def_path):
     generate_all_python_files([def_path], gen_dir)
     # Now parse the main def file to get the model for runner
     from lark_parser import parse_message_dsl
-    from message_model_builder import _build_model_from_lark_tree
+    from def_file_loader import _build_model_from_lark_tree
     with open(def_path, "r", encoding="utf-8") as f:
         dsl = f.read()
     tree = parse_message_dsl(dsl)

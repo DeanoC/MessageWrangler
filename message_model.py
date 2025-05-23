@@ -245,10 +245,10 @@ class Enum:
         return list(values_by_name.values())
     """Represents a standalone enum definition."""
 
-    def __init__(self, name: str, values: List[EnumValue], parent: Optional[str] = None, namespace: Optional[str] = None, description: str = "", comment: str = "", source_file: Optional[str] = None, is_open: bool = False, line_number: Optional[int] = None):
+    def __init__(self, name: str, values: List[EnumValue], parent: Optional[str] = None, namespace: Optional[str] = None, description: str = "", comment: str = "", source_file: Optional[str] = None, is_open: bool = False, line_number: Optional[int] = None, parent_message_name: Optional[str] = None):
         """
         Initialize a standalone enum.
-
+        
         Args:
             name: The name of the enum
             values: The list of enum values
@@ -259,6 +259,7 @@ class Enum:
             source_file: Optional source file path where the enum was defined
             is_open: Whether the enum is an open enum
             line_number: Optional line number where the enum was defined
+            parent_message_name: Optional name of the parent message if this is an inline enum
         """
         self.name = name
         self.values = values
@@ -270,59 +271,62 @@ class Enum:
         self.source_file = source_file
         self.is_open = is_open
         self.line_number = line_number
+        self.parent_message_name = parent_message_name # NEW: Store parent message name for inline enums
         self._min_size_bits = None
 
     def get_full_name(self) -> str:
         """
         Get the fully qualified name of the enum, including namespace.
+        For inline enums, this will be Namespace::MessageName_EnumName_Enum.
 
         Returns:
             The fully qualified name of the enum
         """
+        # For inline enums, the full name is typically Namespace::MessageName_EnumName_Enum
+        if self.parent_message_name:
+            if self.namespace:
+                return f"{self.namespace}::{self.parent_message_name}_{self.name}_Enum"
+            return f"{self.parent_message_name}_{self.name}_Enum"
+        
+        # For standalone enums
         if self.namespace:
             return f"{self.namespace}::{self.name}"
         return self.name
 
-    def get_min_size_bits(self) -> int:
+    def get_reference_name(self, style: str = "colon") -> str:
         """
-        Get the minimum number of bits needed to represent all values in the enum.
-
-        For closed enums, this is the smallest power of 2 that can hold the maximum value.
-        For open enums, this defaults to 32 bits unless a value exceeds that range, then it uses 64 bits.
-
-        Returns:
-            The minimum number of bits (8, 16, 32, or 64)
-        """
-        if self._min_size_bits is not None:
-            return self._min_size_bits
-
-        # Find the maximum value in the enum
-        max_value = 0
-        for value in self.values:
-            if value.value > max_value:
-                max_value = value.value
-
-        # For open enums, default to 32 bits unless a value exceeds that range
-        if self.is_open:
-            if max_value > 0xFFFFFFFF:  # 2^32 - 1
-                self._min_size_bits = 64
-            else:
-                self._min_size_bits = 32
-            return self._min_size_bits
-
-        # For closed enums, find the smallest power of 2 that can hold the maximum value
-        if max_value <= 0xFF:  # 2^8 - 1
-            self._min_size_bits = 8
-        elif max_value <= 0xFFFF:  # 2^16 - 1
-            self._min_size_bits = 16
-        elif max_value <= 0xFFFFFFFF:  # 2^32 - 1
-            self._min_size_bits = 32
-        else:
-            self._min_size_bits = 64
+        Get the reference name for the enum, including namespace and parent message name if inline.
         
-        return self._min_size_bits
+        Args:
+            style: The style of the reference name ("colon" for ::, "dot" for .)
+        
+        Returns:
+            The reference name
+        """
+        if self.parent_message_name:
+            separator = "::" if style == "colon" else "."
+            if self.namespace:
+                return f"{self.namespace}{separator}{self.parent_message_name}{separator}{self.name}"
+            return f"{self.parent_message_name}{separator}{self.name}"
+        
+        if self.namespace:
+            return f"{self.namespace}::{self.name}"
+        return self.name
 
-
+    def get_all_values(self) -> List['EnumValue']:
+        """
+        Get all enum values, including inherited values from parent enums (if any).
+        Child values override parent values with the same name.
+        """
+        values_by_name = {}
+        # Recursively add parent values first
+        if self.parent_enum:
+            for v in self.parent_enum.get_all_values():
+                values_by_name[v.name] = v
+        # Add/override with own values
+        for v in self.values:
+            values_by_name[v.name] = v
+        return list(values_by_name.values())
 class MessageModel:
     """
     Represents the complete model of all message definitions.

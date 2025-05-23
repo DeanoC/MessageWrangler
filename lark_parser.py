@@ -19,7 +19,8 @@ grammar = r"""
     enum_value_or_comment_seq: enum_value_or_comment_item (enum_value_or_comment_sep enum_value_or_comment_item)* enum_value_or_comment_sep?
     enum_value_or_comment_item: enum_value | comment
     enum_value_or_comment_sep: (COMMA | comment)*
-    enum_kind: "enum" | "open_enum"
+    ENUM_KIND: "enum" | "open_enum"
+    enum_kind: ENUM_KIND
     options_def: DOC_COMMENT* "options" NAME "{" option_value_or_comment_list "}"
     option_value_or_comment_list: option_value_or_comment_seq?
     option_value_or_comment_seq: option_value_or_comment_item (option_value_or_comment_sep option_value_or_comment_item)* option_value_or_comment_sep?
@@ -55,7 +56,7 @@ field: comment* field_modifier* NAME ":" type_def field_default? ";"?
     map_value_type: type_def
 
 enum_type: enum_kind ("{" enum_value_or_comment_list "}" | qualified_name_with_dot)
-    enum_value: DOC_COMMENT* NAME ("=" NUMBER)?
+    enum_value: DOC_COMMENT* NAME ("=" NUMBER)? ";"?
 
     options_type: "options" "{" option_value_or_comment_list "}"
     option_value: DOC_COMMENT* NAME ("=" NUMBER)?
@@ -84,7 +85,31 @@ default_expr: /[^;\n]+/
     %ignore WS
 """
 
-parser = Lark(grammar, start='start')
+parser = Lark(
+    grammar,
+    start='start',
+    propagate_positions=True
+)
+
+
+# Transformer to attach line numbers to field nodes
+from lark import Transformer
+class AttachFieldLineNumbers(Transformer):
+    def field(self, items):
+        # Find the first NAME token (field name)
+        for item in items:
+            if hasattr(item, 'type') and item.type == 'NAME':
+                line = getattr(item, 'line', None)
+                break
+        else:
+            line = None
+        node = self.__default__('field', items, None)
+        if line is not None:
+            node.line = line
+        return node
 
 def parse_message_dsl(text):
-    return parser.parse(text)
+    tree = parser.parse(text)
+    # Attach line numbers to field nodes
+    tree = AttachFieldLineNumbers().transform(tree)
+    return tree

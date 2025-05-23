@@ -1,6 +1,6 @@
 import pytest
 from lark_parser import parse_message_dsl
-from message_model_builder import _build_model_from_lark_tree
+from def_file_loader import _build_model_from_lark_tree
 from message_model import FieldType
 
 def test_corner_cases_arrays_and_references():

@@ -20,7 +20,7 @@ class CppGeneratorStd23(CppGeneratorBase):
         if not model or not hasattr(model, 'imports') or not model.imports:
             return (None, None)
         import_map = import_map or {}
-        from message_model_builder import build_model_from_file_recursive
+        from def_file_loader import build_model_from_file_recursive
         for imported_ns, imported_path in model.imports.items():
             imported_base = os.path.splitext(os.path.basename(imported_path))[0]
             if imported_path in already_visited:
@@ -72,6 +72,20 @@ class CppGeneratorStd23(CppGeneratorBase):
         parts = parent.split('::')
         return '::'.join(self._sanitize_identifier(p) for p in parts)
     def _generate_namespace_decls_only(self, ns, def_path=None, header_filename=None, base_filename=None, import_map=None, root_namespace=None, emitted_enum_names=None, emitted_struct_names=None, fully_qualify=False, ns_prefix=None):
+        # --- Collect inline enums from message fields and emit as top-level enums ---
+        # Map: (msg_cpp_name, field_name) -> enum_obj
+        inline_enums_to_emit = []
+        from message_model import FieldType
+        for msg in messages:
+            msg_cpp_name = self._sanitize_identifier(msg.name)
+            for field in getattr(msg, 'fields', []):
+                if (getattr(field, 'field_type', None) == FieldType.INLINE_ENUM or getattr(field, 'inline_enum', None)) and hasattr(field, 'inline_enum') and field.inline_enum is not None:
+                    enum_obj = field.inline_enum
+                    enum_cpp_name = f"{msg_cpp_name}_{self._sanitize_identifier(field.name)}_Enum"
+                    fq_enum_name = f"{ns_name}::{enum_cpp_name}"
+                    if fq_enum_name not in emitted_enum_names:
+                        inline_enums_to_emit.append((enum_cpp_name, enum_obj, fq_enum_name))
+
         """
         Generate only the declarations (structs, enums, etc.) for a namespace, without includes, pragma once, or namespace wrapper.
         Used to avoid duplicate wrappers in the file-level namespace.
@@ -116,9 +130,6 @@ class CppGeneratorStd23(CppGeneratorBase):
                     ref = getattr(field, 'message_reference', None)
                     if ref and ref in model.messages:
                         collect_message_recursive(model.messages[ref])
-                    enum_ref = getattr(field, 'enum_reference', None)
-                    if enum_ref and enum_ref in model.enums:
-                        collect_enum_recursive(model.enums[enum_ref])
             def collect_enum_recursive(enum):
                 fqname = fq_enum_name(enum)
                 if fqname in seen_enum_fqnames:
@@ -136,6 +147,43 @@ class CppGeneratorStd23(CppGeneratorBase):
             def enum_ns_sanitized(enum):
                 ns = getattr(enum, 'namespace', None)
                 return self._sanitize_identifier(ns) if ns is not None else None
+
+            # --- NEW LOGIC: Collect all enums referenced by fields in this namespace ---
+            # First, collect all enums defined in this namespace as before
+            # Then, for all messages in this namespace, collect enums referenced by their fields
+            # This ensures that enums used as field types are always emitted
+            # (even if not top-level in the namespace)
+            #
+            # 1. Collect all enums defined in this namespace (as before)
+            # 2. For each message in this namespace, for each field, if the field references an enum, collect it
+            #
+            # Step 1: as before (done below in roots/enum_roots)
+            # Step 2: after roots/enum_roots, traverse all fields
+
+            # We'll collect additional enums to emit here
+            additional_enums = set()
+            # Find all messages in this namespace
+            all_msgs = [msg for msg in model.messages.values() if msg_ns_sanitized(msg) == sanitized_ns_name_raw]
+            for msg in all_msgs:
+                for field in getattr(msg, 'fields', []):
+                    # Check for enum_reference or enum_type
+                    enum_ref = getattr(field, 'enum_reference', None)
+                    enum_type = getattr(field, 'enum_type', None)
+                    # Check for type string that matches an enum
+                    type_name = getattr(field, 'type', None)
+                    if enum_ref and enum_ref in model.enums:
+                        additional_enums.add(model.enums[enum_ref])
+                    elif enum_type and enum_type in model.enums:
+                        additional_enums.add(model.enums[enum_type])
+                    elif type_name and isinstance(type_name, str) and type_name in model.enums:
+                        additional_enums.add(model.enums[type_name])
+            # Add these to enum_roots for emission
+            # (enum_roots is used below to collect and emit enums)
+            # We'll add any not already present
+            enum_roots = [enum for enum in model.enums.values() if enum_ns_sanitized(enum) == sanitized_ns_name_raw]
+            for enum in additional_enums:
+                if enum not in enum_roots:
+                    enum_roots.append(enum)
         print(f"[DEBUG] _generate_namespace_decls_only: ns_name_raw={ns_name_raw}, ns_name={ns_name}, sanitized_ns_name_raw={sanitized_ns_name_raw}")
         print(f"[DEBUG] Model messages: {[ (m.name, getattr(m, 'namespace', None)) for m in model.messages.values() ]}")
         print(f"[DEBUG] Model enums: {[ (e.name, getattr(e, 'namespace', None)) for e in model.enums.values() ]}")
@@ -216,8 +264,9 @@ class CppGeneratorStd23(CppGeneratorBase):
                 if fq_struct_name not in emitted_struct_names:
                     decls.append(self._generate_compound_struct(struct_name, field, parent_msg, indent="    ", fully_qualify=False, ns_prefix=None))
                     emitted_struct_names.add(fq_struct_name)
-            # Enums
-            for enum in enums_in_ns:
+
+            # --- Emit all enums first (from enum_roots) ---
+            for enum in enum_roots:
                 enum_cpp_name = self._sanitize_identifier(enum.name if not hasattr(enum, 'cpp_name') else enum.cpp_name)
                 enum_cpp_name = enum_cpp_name.split('::')[-1]
                 if not enum_cpp_name.endswith('_Enum'):
@@ -226,19 +275,16 @@ class CppGeneratorStd23(CppGeneratorBase):
                 if fq_enum_name not in emitted_enum_names:
                     decls.append(self._generate_enum_full(enum, indent="    ", fully_qualify=False, ns_prefix=None))
                     emitted_enum_names.add(fq_enum_name)
-            # Inline enums and messages
-            from message_model import FieldType
+
+            # Emit all inline enums as top-level enums (with correct names)
+            for enum_cpp_name, enum_obj, fq_enum_name in inline_enums_to_emit:
+                if fq_enum_name not in emitted_enum_names:
+                    decls.append(self._generate_enum_full(enum_obj, indent="    ", fully_qualify=False, ns_prefix=None, cpp_name_override=enum_cpp_name))
+                    emitted_enum_names.add(fq_enum_name)
+
+            # Emit messages
             for msg in messages_in_ns:
                 msg_cpp_name = self._sanitize_identifier(msg.name)
-                # Inline enums for fields
-                for field in getattr(msg, 'fields', []):
-                    if (getattr(field, 'field_type', None) == FieldType.INLINE_ENUM or getattr(field, 'inline_enum', None)) and hasattr(field, 'inline_enum') and field.inline_enum is not None:
-                        enum_obj = field.inline_enum
-                        enum_cpp_name = f"{msg_cpp_name}_{self._sanitize_identifier(field.name)}_Enum"
-                        fq_enum_name = f"{ns_name}::{enum_cpp_name}"
-                        if fq_enum_name not in emitted_enum_names:
-                            decls.append(self._generate_enum_full(enum_obj, indent="    ", nested=True, fully_qualify=False, ns_prefix=None))
-                            emitted_enum_names.add(fq_enum_name)
                 fq_msg_name = f"{ns_name}::{msg_cpp_name}"
                 if fq_msg_name not in emitted_struct_names:
                     decls.append(self._generate_message_struct(msg, ns_name, indent="    ", effective_ns=ns_name, fully_qualify=False, ns_prefix=None))
@@ -315,10 +361,20 @@ class CppGeneratorStd23(CppGeneratorBase):
         """
         Compatibility wrapper for test and generator code expecting _generate_message_struct.
         Calls _generate_message_struct_with_nested_enums with default empty list for nested_enums if not provided.
+        Adds logic to avoid struct/namespace name collision (C++ C2757).
         """
         if nested_enums is None:
             nested_enums = []
-        # Always fully qualify base class and field types if fully_qualify is True
+        # Check for struct/namespace name collision
+        struct_name = self._sanitize_identifier(getattr(msg, 'name', 'Message'))
+        ns_name_sanitized = self._sanitize_identifier(ns_name, for_namespace=True)
+        # If struct name matches namespace, prefix struct name
+        if struct_name == ns_name_sanitized:
+            struct_name = f"mw_{struct_name}"
+            # Patch the msg object for this emission only, so downstream code uses the new name
+            import copy
+            msg = copy.copy(msg)
+            msg.name = struct_name
         result = self._generate_message_struct_with_nested_enums(
             msg, ns_name, nested_enums, indent=indent, effective_ns=effective_ns,
             fully_qualify=fully_qualify, ns_prefix=ns_prefix
@@ -542,7 +598,7 @@ class CppGeneratorStd23(CppGeneratorBase):
         import_map = {}
         if model and hasattr(model, 'imports') and model.imports:
             import os
-            from message_model_builder import build_model_from_file_recursive
+            from def_file_loader import build_model_from_file_recursive
             for imported_ns, imported_path in model.imports.items():
                 imported_base = os.path.splitext(os.path.basename(imported_path))[0]
                 import_map[imported_ns] = imported_base
@@ -579,8 +635,9 @@ class CppGeneratorStd23(CppGeneratorBase):
                         emitted_enum_names=emitted_enum_names,
                         emitted_struct_names=emitted_struct_names
                     )
-                    # Ensure content is wrapped in namespace block
-                    ns_content += f"namespace {ns_name} {{\n" + inner_content + f"\n}} // namespace {ns_name}\n"
+                    # Only emit the namespace block if it is non-empty (not just whitespace)
+                    if inner_content and inner_content.strip():
+                        ns_content += f"namespace {ns_name} {{\n" + inner_content + f"\n}} // namespace {ns_name}\n"
                 if ns_content.strip():
                     include_directives = ""
                     alias_directives = ""
@@ -691,8 +748,31 @@ class CppGeneratorStd23(CppGeneratorBase):
         enums.sort(key=lambda e: e.name)
         messages.sort(key=lambda m: m.name)
 
-        # Emit enums
+
+        # Emit enums defined in this namespace
         for enum in enums:
+            enum_cpp_name = self._sanitize_identifier(enum.name if not hasattr(enum, 'cpp_name') else enum.cpp_name)
+            enum_cpp_name = enum_cpp_name.split('::')[-1]
+            if not enum_cpp_name.endswith('_Enum'):
+                enum_cpp_name += '_Enum'
+            fq_enum_name = f"{ns_name}::{enum_cpp_name}"
+            if fq_enum_name not in emitted_enum_names:
+                decls.append(self._generate_enum_full(enum, indent="    ", fully_qualify=True, ns_prefix=ns_name))
+                emitted_enum_names.add(fq_enum_name)
+
+        # --- Emit enums referenced by message fields (even if not top-level in ns.enums) ---
+        # Collect all enums referenced by fields in this namespace's messages
+        referenced_enums = set()
+        def collect_field_enums(msg):
+            for field in getattr(msg, 'fields', []):
+                # If the field has an enum reference, add it
+                enum_obj = getattr(field, 'enum', None)
+                if enum_obj is not None:
+                    referenced_enums.add(enum_obj)
+        for msg in messages:
+            collect_field_enums(msg)
+        # Emit any referenced enums not already emitted
+        for enum in referenced_enums:
             enum_cpp_name = self._sanitize_identifier(enum.name if not hasattr(enum, 'cpp_name') else enum.cpp_name)
             enum_cpp_name = enum_cpp_name.split('::')[-1]
             if not enum_cpp_name.endswith('_Enum'):
