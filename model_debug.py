@@ -170,6 +170,15 @@ def debug_print_early_model(early_model: EarlyModel, indent=0, file_path=None, o
   if imports_raw:
     add_line(f"{ind}  Imports Raw: {imports_raw}")
 
+  imports = getattr(early_model, 'imports', None)
+  if imports:
+    add_line(f"{ind}  Imports (resolved):")
+    for k, v in imports.items():
+      v_file = getattr(v, 'file', '?')
+      v_namespaces = getattr(v, 'namespaces', [])
+      ns_names = [getattr(ns, 'name', '?') for ns in v_namespaces]
+      add_line(f"{ind}    {k}: file='{v_file}', namespaces={ns_names}")
+
   _print_standalone_options_list(getattr(early_model, 'standalone_options', []), indent + 1, add_line, "Top-Level Standalone Options")
   _print_standalone_compounds_list(getattr(early_model, 'standalone_compounds', []), indent + 1, add_line, "Top-Level Standalone Compounds")
 

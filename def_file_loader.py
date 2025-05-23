@@ -1,4 +1,3 @@
-
 # def_file_loader.py
 # Handles reading .def files and resolving imports recursively for MessageWrangler.
 import os
@@ -9,6 +8,15 @@ from lark import Token, Tree
 from message_model import MessageModel, Enum
 from model_debug import debug_print_early_model, pretty_print_model
 from early_model import EarlyModel, EarlyNamespace, EarlyMessage, EarlyField, EarlyEnum, EarlyEnumValue
+
+# Convenience function to load a .def file and return an EarlyModel
+
+def load_def_file(def_file_path: str):
+    with open(def_file_path, 'r', encoding='utf-8') as f:
+        text = f.read()
+    file_namespace = os.path.splitext(os.path.basename(def_file_path))[0]
+    tree = parse_message_dsl(text)
+    return _build_early_model_from_lark_tree(tree, file_namespace, source_file=def_file_path)
 
 def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: str, source_file: str = None):
 

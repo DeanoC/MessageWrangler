@@ -90,7 +90,8 @@ class EarlyModel:
     standalone_options: List[Dict[str, Any]], # Top-level options
     standalone_compounds: List[Dict[str, Any]], # Top-level compounds
     imports_raw: List[Tuple[str, Optional[str]]], # List of (path, alias) tuples
-    file: str # The main file being parsed  
+    file: str, # The main file being parsed
+    imports: dict = None # Mapping of import name to EarlyModel
   ):
     self.namespaces = namespaces
     self.enums = enums
@@ -99,3 +100,4 @@ class EarlyModel:
     self.standalone_options = standalone_options
     self.standalone_compounds = standalone_compounds
     self.imports_raw = imports_raw
+    self.imports = imports if imports is not None else {}
