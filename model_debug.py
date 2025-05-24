@@ -332,12 +332,14 @@ def debug_print_model(model, indent=0, file_path=None, out_dir="./generated/mode
                 ref = field.type_refs[i] if i < len(field.type_refs) else None
                 tname = field.type_names[i] if i < len(field.type_names) else None
                 s = f"type[{i}]={ftype.name}"
-                # Remove field name from type metadata in model output
-                # if tname and tname != '?':
-                #     s += f" (name='{tname}')"
                 if ref is not None:
                     s += f" (ref={getattr(ref, 'name', ref)})"
                 field_details.append(s)
+            # Print compound base type and components if present
+            if hasattr(field, 'compound_base_type') and field.compound_base_type:
+                field_details.append(f"base_type={field.compound_base_type}")
+            if hasattr(field, 'compound_components') and field.compound_components:
+                field_details.append(f"components={field.compound_components}")
             if field.modifiers:
                 field_details.append(f"modifiers={[m.name for m in field.modifiers]}")
             if field.default is not None:

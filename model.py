@@ -65,6 +65,8 @@ class ModelField:
         file: Optional[str] = None,
         line: Optional[int] = None,
         namespace: Optional[str] = None,
+        compound_base_type: Optional[str] = None,
+        compound_components: Optional[list] = None,
     ):
         self.name = name
         self.field_types = field_types
@@ -78,6 +80,8 @@ class ModelField:
         self.file = file
         self.line = line
         self.namespace = namespace
+        self.compound_base_type = compound_base_type
+        self.compound_components = compound_components or []
 
 class ModelEnumValue:
     def __init__(self, name: str, value: int, doc: Optional[str] = None, comment: Optional[str] = None, file: Optional[str] = None, line: Optional[int] = None, namespace: Optional[str] = None):

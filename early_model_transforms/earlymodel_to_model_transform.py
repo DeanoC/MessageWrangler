@@ -67,7 +67,7 @@ class EarlyModelToModelTransform:
                     if qfn.endswith(f'::{type_name}') or qfn == type_name:
                         return FieldType.MESSAGE, qfn
                 return FieldType.MESSAGE, type_name
-            elif type_type == 'compound_type':
+            elif type_type in ('compound', 'compound_type'):
                 return FieldType.COMPOUND, type_name
             elif type_type == 'options_type':
                 return FieldType.OPTIONS, type_name
@@ -307,6 +307,12 @@ class EarlyModelToModelTransform:
                             if mod.value == m:
                                 modifiers.append(mod)
                                 break
+                # If this is a compound field, pass base type and components
+                compound_base_type = None
+                compound_components = None
+                if (ftype == FieldType.COMPOUND or type_type in ('compound', 'compound_type')):
+                    compound_base_type = getattr(field, 'compound_base_type_raw', None)
+                    compound_components = getattr(field, 'compound_components_raw', None)
                 model_field = ModelField(
                     name=field.name,
                     field_types=field_types,
@@ -319,7 +325,9 @@ class EarlyModelToModelTransform:
                     inline_values=inline_values,
                     file=getattr(field, 'file', None),
                     line=getattr(field, 'line', None),
-                    namespace=getattr(field, 'namespace', None)
+                    namespace=getattr(field, 'namespace', None),
+                    compound_base_type=compound_base_type,
+                    compound_components=compound_components
                 )
                 fields.append(model_field)
             # Convert parent_raw to ModelReference if present

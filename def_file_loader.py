@@ -353,12 +353,16 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
 
         # Patch: type_name is the type string (prefer referenced_name_raw, then raw_type, then type_type)
         type_name = type_info.get('referenced_name_raw') or type_info.get('raw_type') or type_info.get('type_name', '?')
-        # If type_name is a primitive, set type_type to 'primitive', else use the current logic
-        primitives = {'int', 'float', 'string', 'bool', 'double'}
-        if type_name in primitives:
-            type_type = 'primitive'
+
+        # If this is a compound, set type_type to 'compound', else use primitive/other logic
+        if type_info.get('compound_base_type_raw') and type_info.get('compound_components_raw'):
+            type_type = 'compound'
         else:
-            type_type = type_info.get('type_name', '?')
+            primitives = {'int', 'float', 'string', 'bool', 'double'}
+            if type_name in primitives:
+                type_type = 'primitive'
+            else:
+                type_type = type_info.get('type_name', '?')
 
         field = EarlyField(
             name=name,
