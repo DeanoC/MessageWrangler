@@ -27,38 +27,30 @@ def test_enum_generation_and_validation():
     # Validate enums
     # The enum name is now flattened: test_standalone_enum_TestEnum
     # Flat names for all enums
-    assert hasattr(mod, "test_standalone_enum_TestEnum")
-    enum_flat = getattr(mod, "test_standalone_enum_TestEnum")
-    assert enum_flat.Zero.value == 0
-    assert enum_flat.One.value == 1
-    assert enum_flat.Two.value == 2
-    assert hasattr(mod, "test_standalone_enum_TestOpenEnum")
-    open_enum_flat = getattr(mod, "test_standalone_enum_TestOpenEnum")
-    assert open_enum_flat.Zero.value == 0
-    assert open_enum_flat.One.value == 1
-    assert open_enum_flat.Two.value == 2
-    assert hasattr(mod, "test_standalone_enum_TestEnumWithInheritance")
-    inh_enum_flat = getattr(mod, "test_standalone_enum_TestEnumWithInheritance")
-    assert inh_enum_flat.Three.value == 3
-    assert inh_enum_flat.Four.value == 4
-    assert hasattr(mod, "test_standalone_enum_TestMessage_enumField")
-    msg_enum_flat = getattr(mod, "test_standalone_enum_TestMessage_enumField")
-    assert msg_enum_flat.Zero.value == 0
-    assert msg_enum_flat.One.value == 1
-    assert msg_enum_flat.Two.value == 2
-    assert hasattr(mod, "test_standalone_enum_TestNamespace_NamespacedEnum")
-    ns_enum_flat = getattr(mod, "test_standalone_enum_TestNamespace_NamespacedEnum")
-    assert ns_enum_flat.Zero.value == 0
-    assert ns_enum_flat.One.value == 1
-    assert ns_enum_flat.Two.value == 2
-    # If NamespacedEnum is in a namespace class, check there
-    if hasattr(mod, "TestNamespace"):
-        ns = getattr(mod, "TestNamespace")
-        assert hasattr(ns, "NamespacedEnum")
-        assert ns.NamespacedEnum.Zero.value == 0
-        assert ns.NamespacedEnum.One.value == 1
-        assert ns.NamespacedEnum.Two.value == 2
-    else:
-        assert mod.NamespacedEnum.Zero.value == 0
-        assert mod.NamespacedEnum.One.value == 1
-        assert mod.NamespacedEnum.Two.value == 2
+    # All enums/messages are now inside the file-level namespace class
+    ns = getattr(mod, "test_standalone_enum")
+    assert hasattr(ns, "TestEnum")
+    enum_nested = getattr(ns, "TestEnum")
+    assert enum_nested.Zero.value == 0
+    assert enum_nested.One.value == 1
+    assert enum_nested.Two.value == 2
+    assert hasattr(ns, "TestOpenEnum")
+    open_enum_nested = getattr(ns, "TestOpenEnum")
+    assert open_enum_nested.Zero.value == 0
+    assert open_enum_nested.One.value == 1
+    assert open_enum_nested.Two.value == 2
+    assert hasattr(ns, "TestEnumWithInheritance")
+    inh_enum_nested = getattr(ns, "TestEnumWithInheritance")
+    assert inh_enum_nested.Three.value == 3
+    assert inh_enum_nested.Four.value == 4
+    assert hasattr(ns, "TestMessage_enumField")
+    msg_enum_nested = getattr(ns, "TestMessage_enumField")
+    assert msg_enum_nested.Zero.value == 0
+    assert msg_enum_nested.One.value == 1
+    assert msg_enum_nested.Two.value == 2
+    assert hasattr(ns, "TestNamespace")
+    ns2 = getattr(ns, "TestNamespace")
+    assert hasattr(ns2, "NamespacedEnum")
+    assert ns2.NamespacedEnum.Zero.value == 0
+    assert ns2.NamespacedEnum.One.value == 1
+    assert ns2.NamespacedEnum.Two.value == 2

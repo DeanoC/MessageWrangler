@@ -32,13 +32,13 @@ def test_enum_inheritance_and_imports():
     with open(comms_py_path, encoding="utf-8") as f:
         contents = f.read()
     assert "from .sh4c_base import *" in contents
-    # Validate enum inheritance and values (flat structure)
-    cmd_enum = getattr(comms_mod, "sh4c_comms_ClientCommands_Command")
-    base_enum = getattr(base_mod, "sh4c_base_Command_type")
+    # Validate enum inheritance and values (Pythonic nested structure)
+    cmd_enum = comms_mod.sh4c_comms.ClientCommands.Command
+    base_enum = base_mod.sh4c_base.Command_type
     # Python Enum does not support subclassing, so check for intended inheritance comment and value overlap
     with open(comms_py_path, encoding="utf-8") as f:
         code = f.read()
-    assert "Intended to inherit from sh4c_base_Command_type" in code, "Missing intended inheritance comment"
+    assert "Intended to inherit from sh4c_base_Command_type" in code or "Intended to inherit from sh4c_base.Command_type" in code, "Missing intended inheritance comment"
     # Check that enum values are present and correct
     assert cmd_enum.ChangeMode.value == 1000
     assert cmd_enum.ModesAvailable.value == 1001
