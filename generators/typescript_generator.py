@@ -3,35 +3,10 @@ TypeScript code generator for MessageWrangler message definitions.
 Mirrors the structure and features of the Python v3 generator.
 """
 
+
 from typing import List, Dict, Set, Optional
 from message_model import MessageModel, Field, Enum, CompoundField, Namespace, Message
-
-PY_TO_TS_TYPE = {
-    'int': 'number',
-    'float': 'number',
-    'double': 'number',
-    'bool': 'boolean',
-    'str': 'string',
-    'bytes': 'Uint8Array',
-    'Any': 'any',
-}
-
-def map_type(field: Field, imports: Set[str], current_ns: str) -> str:
-    """Map a Field to a TypeScript type, handling arrays, optionals, and cross-namespace refs."""
-    base_type = field.field_type.value if hasattr(field.field_type, 'value') else field.field_type
-    if base_type in PY_TO_TS_TYPE:
-        ts_type = PY_TO_TS_TYPE[base_type]
-    elif getattr(field, 'enum_values', None):
-        ts_type = field.enum_reference or base_type
-    elif getattr(field, 'compound_base_type', None):
-        ts_type = field.compound_reference or base_type
-    else:
-        ts_type = 'any'
-    if getattr(field, 'is_array', False):
-        ts_type += '[]'
-    if getattr(field, 'optional', False):
-        ts_type += ' | undefined'
-    return ts_type
+from generators.generator_utils import get_typescript_type, get_local_name, get_qualified_name, collect_referenced_imports
 
 def generate_enum(enum: Enum) -> str:
     lines = [f"export enum {enum.name} {{"]
@@ -44,7 +19,7 @@ def generate_compound(comp: CompoundField, imports: Set[str], current_ns: str) -
     lines = [f"export interface {comp.name} {{"]
     for component in comp.components:
         # Each component is just a name, type is the base_type
-        ts_type = PY_TO_TS_TYPE.get(comp.base_type, 'any')
+        ts_type = get_typescript_type(comp)
         lines.append(f"    {component}: {ts_type};")
     lines.append("}")
     return '\n'.join(lines)
@@ -53,13 +28,13 @@ def generate_message(msg: Message, imports: Set[str], current_ns: str) -> str:
     base = f" extends {msg.parent}" if getattr(msg, 'parent', None) else ""
     lines = [f"export interface {msg.name}{base} {{"]
     for field in getattr(msg, 'fields', []):
-        ts_type = map_type(field, imports, current_ns)
+        ts_type = get_typescript_type(field)
         lines.append(f"    {field.name}: {ts_type};")
     lines.append("}")
     return '\n'.join(lines)
 
 def generate_namespace(ns: Namespace) -> str:
-    imports: Set[str] = set()
+    imports: Set[str] = collect_referenced_imports(ns)
     body: List[str] = []
     for enum in getattr(ns, 'enums', {}).values() if hasattr(ns, 'enums') else []:
         body.append(generate_enum(enum))

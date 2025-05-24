@@ -42,9 +42,9 @@ message MessageName [ : ParentMessage ] {
 
 - **Basic types:** `string`, `int`, `float`, `bool`, `byte`
 - **Enum:** `enum { ... }` (inline) or reference to another enum (see below)
-- **Options:** `options { ... }` (inline)
-- **Compound:** `float { x, y, z }` (currently only float supported)
-- **Message reference:** `OtherMessage` or `Namespace::OtherMessage`
+- **Options:** `options { ... }` (inline) or reference to another options type.
+- **Compound:** `float { x, y, z }` (currently only float supported). These are defined inline. In generated code, they result in a class, typically named `MessageName_fieldName_Compound` if part of `MessageName`.
+- **Message reference:** `MessageName` (if in current scope/namespace or imported directly without an alias) or `NamespaceIdentifier::MessageName`.
 - **Array:** `Type[]` (e.g., `string[]`, `Vec3[]`)
 - **Map:** `Map<string, Type>` (key must be string)
 
@@ -186,15 +186,14 @@ import "./base.def" as Base
 | Field          | name: string                          |                                       |
 | Array          | tags: string[]                        | No nested arrays; nested arrays rejected |
 | Map            | dict: Map<string, int>                | Key must be string                    |
-| Enum           | enum Status { OK = 0, ERR = 1 }       | Inline or top-level                   |
-| Enum Ref       | field: OtherMsg.Status                | Cross-file/namespace refs imported    |
+| Enum           | enum Status { OK=0, ERR=1 }           | Inline or top-level. Referenced as `EnumName` or `Namespace::EnumName`. |
+| Enum Ref       | field: MyNamespace::MyEnum            | Cross-file/namespace refs imported    |
 | Options        | options Perms { Read = 1, ... }       | Bit flags                             |
 | Compound       | float { x, y, z }                     | Only float supported; always emitted as class |
 | Namespace      | namespace NS { ... }                  |                                       |
 | Import         | import "./foo.def" as Bar             | Cross-file/namespace refs imported    |
 | Comments       | /// doc, // local, /*...*/            | /// included in output                |
-| Reserved Names | tags_, dict_, ...                     | Reserved/built-in names suffixed with _ |
+| Reserved Name Handling (Python Gen) | `name` -> `name_` | Python generator suffixes names conflicting with reserved words/built-ins. |
 
----
 
 This document is intended for LLM and tool consumption. For human-oriented documentation, see `message_format_documentation.md`.
