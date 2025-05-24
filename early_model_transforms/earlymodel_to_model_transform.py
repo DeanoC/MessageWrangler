@@ -370,8 +370,44 @@ class EarlyModelToModelTransform:
             return model_ns
 
         model_namespaces = [convert_namespace(ns) for ns in early_model.namespaces]
-        # Carry over options/compounds from EarlyModel
-        options = getattr(early_model, 'options', [])
+        # Collect and convert all options from all namespaces recursively
+        def collect_options_from_namespaces(namespaces):
+            result = []
+            for ns in namespaces:
+                for opt in getattr(ns, 'options', []):
+                    values = [
+                        ModelEnumValue(
+                            v.get('name', '?'),
+                            v.get('value', None),
+                            doc=v.get('doc', None),
+                            comment=v.get('comment', None),
+                            file=v.get('file', None),
+                            line=v.get('line', None),
+                            namespace=v.get('namespace', None)
+                        ) for v in opt.get('values_raw', [])
+                    ]
+                    opt_name = opt.get('name', '?')
+                    ns_name = ns.name if ns.name and ns.name != '?' else None
+                    if ns_name:
+                        opt_name = f"{ns_name}::{opt_name}"
+                    model_enum = ModelEnum(
+                        name=opt_name,
+                        values=values,
+                        is_open=False,
+                        parent=None,
+                        doc=opt.get('doc', None),
+                        comment=opt.get('comment', None),
+                        parent_raw=None,
+                        file=opt.get('file', None),
+                        line=opt.get('line', None),
+                        namespace=ns_name
+                    )
+                    result.append(model_enum)
+                # Recurse into nested namespaces
+                result.extend(collect_options_from_namespaces(getattr(ns, 'namespaces', [])))
+            return result
+
+        options = collect_options_from_namespaces(getattr(early_model, 'namespaces', []))
         compounds = getattr(early_model, 'compounds', [])
         # Build alias map and imports dict from imports_raw
         alias_map = {}

@@ -7,7 +7,7 @@ def test_imported_file_level_namespace_present():
     Ensure that every imported EarlyModel has a file-level namespace present, even if the imported file declares no explicit namespace.
     This is critical for alias mapping and QFN resolution in downstream transforms.
     """
-    def_path = os.path.join(os.path.dirname(__file__), "def", "sh4c_comms.def")
+    def_path = os.path.join(os.path.dirname(__file__), "../def", "sh4c_comms.def")
     early_model, all_models = load_early_model_with_imports(def_path)
     # Check all imports
     for key, imported in early_model.imports.items():

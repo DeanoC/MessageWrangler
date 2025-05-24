@@ -7,7 +7,7 @@ from early_model_transforms.earlymodel_to_model_transform import EarlyModelToMod
 from model import FieldType, ModelReference
 
 def test_array_and_reference():
-    def_file = os.path.join(os.path.dirname(__file__), "def", "test_arrays_and_references.def")
+    def_file = os.path.join(os.path.dirname(__file__), "../def", "test_arrays_and_references.def")
     with open(def_file, 'r', encoding='utf-8') as f:
         text = f.read()
     file_namespace = os.path.splitext(os.path.basename(def_file))[0]

@@ -10,7 +10,7 @@ from def_file_loader import _build_early_model_from_lark_tree
 from early_transform_pipeline import run_early_transform_pipeline
 from early_model_transforms.qfn_reference_transform import QfnReferenceTransform
 
-def_dir = os.path.join(os.path.dirname(__file__), "def")
+def_dir = os.path.join(os.path.dirname(__file__), "../def")
 def get_def_files():
     return [os.path.join(def_dir, f) for f in os.listdir(def_dir) if f.endswith(".def") and "invalid" not in f and "corner_case" not in f]
 

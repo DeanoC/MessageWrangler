@@ -8,6 +8,20 @@ from lark import Token, Tree
 from message_model import MessageModel, Enum
 from model_debug import debug_print_early_model, pretty_print_model
 from early_model import EarlyModel, EarlyNamespace, EarlyMessage, EarlyField, EarlyEnum, EarlyEnumValue
+import warnings
+import functools
+
+def deprecated(func):
+    """Marks a function as deprecated."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        warnings.warn(
+            f"Call to deprecated function {func.__name__}.",
+            category=DeprecationWarning,
+            stacklevel=2
+        )
+        return func(*args, **kwargs)
+    return wrapper
 
 # Convenience function to load a .def file and return an EarlyModel
 
@@ -19,6 +33,16 @@ def load_def_file(def_file_path: str):
     return _build_early_model_from_lark_tree(tree, file_namespace, source_file=def_file_path)
 
 def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: str, source_file: str = None):
+    # Top-level: scan for namespaces, messages, enums, options_def, compound_def, import_stmt
+    namespaces = []
+    free_messages = [] # Top-level messages
+    free_enums = [] # Top-level enums
+    options = [] # Top-level options_def
+    compounds = [] # Top-level compound_def
+    imports_raw = [] # List of (path, alias) tuples
+
+    # DEBUG: Print tree for inspection
+    print(f"[DEBUG] Parse tree: {tree}")
 
     """Build an EarlyModel from a Lark parse tree, capturing raw information."""
 
@@ -248,6 +272,30 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
         return info
 
     def _parse_value_list_raw(values_tree, kind):
+        # (Debug output removed)
+        value_node_name = 'enum_value' if kind == 'enum' else 'option_value'
+        def flatten_nodes(nodes, out):
+            for node in nodes:
+                if isinstance(node, Tree) and getattr(node, 'data', None) in (
+                    'option_value_or_comment_list',
+                    'option_value_or_comment_seq',
+                    'option_value_or_comment_item',
+                    'enum_value_or_comment_list',
+                    'enum_value_or_comment_seq',
+                    'enum_value_or_comment_item',
+                    'option_value_or_comment_sep',
+                    'enum_value_or_comment_sep',
+                ):
+                    flatten_nodes(node.children, out)
+                elif isinstance(node, Tree) and getattr(node, 'data', None) == value_node_name:
+                    out.append(('value', node))
+                elif isinstance(node, Tree) and getattr(node, 'data', None) == 'comment':
+                    for c in node.children:
+                        if isinstance(c, Token) and c.type == 'DOC_COMMENT':
+                            out.append(('doc', str(c).strip()))
+                elif isinstance(node, Token) and node.type == 'DOC_COMMENT':
+                    out.append(('doc', str(node).strip()))
+                # Ignore other nodes (LOCAL_COMMENT, C_COMMENT, etc.)
         """Generic raw value list parser for enums/options. Returns list of raw value dicts."""
         raw_values = []
         if values_tree is None:
@@ -255,35 +303,77 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
 
         value_node_name = 'enum_value' if kind == 'enum' else 'option_value'
 
-        # Manual filter for Lark compatibility: iterate all subtrees and select those with .data == value_node_name
-        for value_node in values_tree.iter_subtrees():
-            if not (isinstance(value_node, Tree) and getattr(value_node, 'data', None) == value_node_name):
-                continue
-            vname = None
-            vval = None
-            # Grammar for enum_value/option_value: DOC_COMMENT* NAME ...
-            # DOC_COMMENT tokens are direct children of value_node.
-            doc_strings = []
-            for child_token in value_node.children:
-                if isinstance(child_token, Token) and child_token.type == 'DOC_COMMENT':
-                    doc_strings.append(str(child_token).strip())
-                elif isinstance(child_token, Token) and child_token.type == 'NAME':
-                    vname = str(child_token)
-                elif isinstance(child_token, Token) and child_token.type == 'NUMBER':
-                    vval = int(str(child_token))
-            vdoc_str = "\n".join(doc_strings)
-            # For EarlyModel's raw values, 'comment' can be the same as 'doc'.
-            # More sophisticated comment association (like preceding general comments)
-            # is harder with iter_subtrees without parent context.
-            vcomment_str = vdoc_str
+        # Flatten the tree into a sequence of ('doc', docstring) and ('value', value_node) pairs
+        def flatten_nodes(nodes, out):
+            for node in nodes:
+                if isinstance(node, Tree) and getattr(node, 'data', None) in (
+                    'option_value_or_comment_list',
+                    'option_value_or_comment_seq',
+                    'option_value_or_comment_item',
+                    'enum_value_or_comment_list',
+                    'enum_value_or_comment_seq',
+                    'enum_value_or_comment_item',
+                    'option_value_or_comment_sep',
+                    'enum_value_or_comment_sep',
+                ):
+                    flatten_nodes(node.children, out)
+                elif isinstance(node, Tree) and getattr(node, 'data', None) == value_node_name:
+                    out.append(('value', node))
+                elif isinstance(node, Tree) and getattr(node, 'data', None) == 'comment':
+                    for c in node.children:
+                        if isinstance(c, Token) and c.type == 'DOC_COMMENT':
+                            out.append(('doc', str(c).strip()))
+                elif isinstance(node, Token) and node.type == 'DOC_COMMENT':
+                    out.append(('doc', str(node).strip()))
+                # Ignore other nodes (LOCAL_COMMENT, C_COMMENT, etc.)
 
-            if vname is not None:
-                raw_values.append({
-                    'name': vname,
-                    'value': vval, # Can be None if no explicit value
-                    'doc': vdoc_str,
-                    'comment': vcomment_str
-                })
+        flat_seq = []
+        if hasattr(values_tree, 'children'):
+            flatten_nodes(values_tree.children, flat_seq)
+
+        # Robust doc association: attach all preceding DOCs to a value, and also attach an inline DOC if it immediately follows
+        doc_buffer = []
+        i = 0
+        n = len(flat_seq)
+        while i < n:
+            typ, item = flat_seq[i]
+            if typ == 'doc':
+                doc_buffer.append(item)
+                i += 1
+            elif typ == 'value':
+                vname = None
+                vval = None
+                child_doc_strings = []
+                for child_token in item.children:
+                    if isinstance(child_token, Token) and child_token.type == 'DOC_COMMENT':
+                        child_doc_strings.append(str(child_token).strip())
+                    elif isinstance(child_token, Token) and child_token.type == 'NAME':
+                        vname = str(child_token)
+                    elif isinstance(child_token, Token) and child_token.type == 'NUMBER':
+                        vval = int(str(child_token))
+                doc_strings = []
+                # Preceding doc comments (buffer) or child doc comments
+                if doc_buffer:
+                    doc_strings.extend(doc_buffer)
+                elif child_doc_strings:
+                    doc_strings.extend(child_doc_strings)
+                # If neither, look for inline doc comment (immediately after value)
+                elif i + 1 < n and flat_seq[i + 1][0] == 'doc':
+                    doc_strings.append(flat_seq[i + 1][1])
+                    i += 1  # Skip the inline doc for the next value
+                vdoc_str = "\n".join([d.strip() for d in doc_strings])
+                vcomment_str = vdoc_str
+                if vname is not None:
+                    raw_values.append({
+                        'name': vname,
+                        'value': vval, # Can be None if no explicit value
+                        'doc': vdoc_str,
+                        'comment': vcomment_str
+                    })
+                doc_buffer.clear()
+                i += 1
+            else:
+                i += 1
         return raw_values
 
     def parse_field(field_node, namespace, file, parent_children=None, node_index=None):
@@ -472,7 +562,16 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
     def _parse_options_def(options_node, namespace, file, parent_children=None, node_index=None):
         name = "?"
         line = get_line(options_node)
+        # Robust doc extraction: check both preceding siblings and direct children for DOC_COMMENT
         doc, comment = _extract_comments(options_node, parent_children, node_index)
+        # If doc is empty, check for DOC_COMMENT tokens as direct children
+        if not doc:
+            doc_comments = []
+            for child in options_node.children:
+                if isinstance(child, Token) and child.type == 'DOC_COMMENT':
+                    doc_comments.append(str(child).strip())
+            if doc_comments:
+                doc = "\n".join(doc_comments)
         values_tree = None
 
         for child in options_node.children:
@@ -577,6 +676,7 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
 
 
 # Place this at the end of the file, after all helper functions (including process_node)
+@deprecated
 def _build_model_from_lark_tree(tree, current_processing_file_namespace: str, source_file: str = None):
     """
     Build a MessageModel from a Lark parse tree.
@@ -1493,6 +1593,7 @@ def _build_model_from_lark_tree(tree, current_processing_file_namespace: str, so
         print(f"  - {ns_name}: messages={list(getattr(ns_obj, 'messages', {}).keys())}")
     return model
 
+@deprecated
 def build_model_from_file_recursive(main_file_path: str, already_loaded=None) -> MessageModel:
 
     # moving to a flatten non recursive implementation
@@ -1656,7 +1757,7 @@ def build_model_from_file_recursive(main_file_path: str, already_loaded=None) ->
     pretty_print_model(model, file_path=json_path)
 
     return model
-
+@deprecated
 def _get_all_imported_files(main_file_path: str, already_loaded=None) -> list:
     """
     Recursively collect all imported .def files (full absolute paths) starting from main_file_path.

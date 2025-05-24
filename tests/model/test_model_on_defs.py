@@ -9,7 +9,7 @@ from early_model_transforms.qfn_reference_transform import QfnReferenceTransform
 from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
 from model import Model
 
-def_dir = os.path.join(os.path.dirname(__file__), "def")
+def_dir = os.path.join(os.path.dirname(__file__), "../def")
 def get_def_files():
     # Exclude known validation-failure files (like test_duplicate_fields.def)
     # Exclude known validation-failure files (like test_duplicate_fields.def, test_duplicate_messages.def)

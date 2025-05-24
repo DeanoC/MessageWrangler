@@ -8,7 +8,7 @@ from early_model_transforms.earlymodel_to_model_transform import EarlyModelToMod
 from model_debug import debug_print_model
 
 def test_model_multiline_root_debug(capsys):
-    def_file = os.path.join(os.path.dirname(__file__), 'def', 'test_multiline_root.def')
+    def_file = os.path.join(os.path.dirname(__file__), '../def', 'test_multiline_root.def')
     with open(def_file, 'r', encoding='utf-8') as f:
         text = f.read()
     file_namespace = os.path.splitext(os.path.basename(def_file))[0]

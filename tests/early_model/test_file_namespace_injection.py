@@ -5,7 +5,7 @@ from early_model_transforms.add_file_level_namespace_transform import AddFileLev
 from early_model import EarlyNamespace
 
 def test_file_namespace_injection():
-    def_file = os.path.join(os.path.dirname(__file__), "def", "test_arrays_and_references.def")
+    def_file = os.path.join(os.path.dirname(__file__), "../def", "test_arrays_and_references.def")
     with open(def_file, 'r', encoding='utf-8') as f:
         text = f.read()
     file_namespace = os.path.splitext(os.path.basename(def_file))[0]

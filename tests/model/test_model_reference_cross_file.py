@@ -6,7 +6,7 @@ from model import ModelReference
 
 def test_model_reference_resolution_across_files():
     # Load main.def and all its imports using the correct pipeline
-    main_path = os.path.join(os.path.dirname(__file__), "def", "main.def")
+    main_path = os.path.join(os.path.dirname(__file__), "../def", "main.def")
     early_main, all_early_models = load_early_model_with_imports(main_path)
 
 

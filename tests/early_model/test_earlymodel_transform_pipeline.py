@@ -12,7 +12,7 @@ def test_transformed_earlymodel_qfns_and_imports():
         ("sh4c_comms.def", "CommCommand", "Command"),
     ]
     for def_file, child_name, parent_name in test_cases:
-        def_path = os.path.join(os.path.dirname(__file__), "def", def_file)
+        def_path = os.path.join(os.path.dirname(__file__), "../def", def_file)
         early_model, all_models = load_early_model_with_imports(def_path)
 
         # Check that all namespaces and messages have QFNs assigned

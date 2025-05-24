@@ -6,7 +6,7 @@ from model import ModelReference
 
 def test_model_reference_resolution_sh4c():
     # Load sh4c_comms.def and all its imports using the correct pipeline
-    comms_path = os.path.join(os.path.dirname(__file__), "def", "sh4c_comms.def")
+    comms_path = os.path.join(os.path.dirname(__file__), "../def", "sh4c_comms.def")
     early_comms, all_early_models = load_early_model_with_imports(comms_path)
 
     # Assert that after full EarlyModel transformation, all aliases are set in early_comms.imports
