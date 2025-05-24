@@ -121,6 +121,8 @@ class QfnReferenceTransform(EarlyTransform):
                             qfn = resolve_unqualified(field.type_name, ns_stack)
                         if qfn:
                             field.type_name = qfn
+                # Debug: print the type_name after possible QFN rewrite
+                print(f"[QFN DEBUG] After QFN transform: field '{getattr(field, 'name', '?')}' type_name = '{getattr(field, 'type_name', None)}'")
                 # Array element type
                 if hasattr(field, 'element_type_raw') and field.element_type_raw:
                     if field.element_type_raw not in primitives:

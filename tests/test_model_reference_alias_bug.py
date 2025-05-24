@@ -11,12 +11,19 @@ def test_model_reference_alias_bug():
     # Convert all EarlyModels to ModelNamespaces and merge
     from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
     all_namespaces = []
+    merged_alias_map = {}
+    merged_imports = {}
     for em in all_early_models.values():
         model = EarlyModelToModelTransform().transform(em)
         all_namespaces.extend(model.namespaces)
-    # Build a Model with all namespaces
+        # Merge alias_map and imports from each model
+        if hasattr(model, 'alias_map') and model.alias_map:
+            merged_alias_map.update(model.alias_map)
+        if hasattr(model, 'imports') and model.imports:
+            merged_imports.update(model.imports)
+    # Build a Model with all namespaces and merged alias_map/imports
     from model import Model
-    model_comms = Model(file=comms_path, namespaces=all_namespaces)
+    model_comms = Model(file=comms_path, namespaces=all_namespaces, alias_map=merged_alias_map, imports=merged_imports)
 
     # Recursively find ClientCommands namespace
     def find_namespace(ns_list, target):

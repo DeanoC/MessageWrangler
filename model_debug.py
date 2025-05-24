@@ -332,8 +332,9 @@ def debug_print_model(model, indent=0, file_path=None, out_dir="./generated/mode
                 ref = field.type_refs[i] if i < len(field.type_refs) else None
                 tname = field.type_names[i] if i < len(field.type_names) else None
                 s = f"type[{i}]={ftype.name}"
-                if tname:
-                    s += f" (name='{tname}')"
+                # Remove field name from type metadata in model output
+                # if tname and tname != '?':
+                #     s += f" (name='{tname}')"
                 if ref is not None:
                     s += f" (ref={getattr(ref, 'name', ref)})"
                 field_details.append(s)

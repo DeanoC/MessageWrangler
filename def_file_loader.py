@@ -150,6 +150,9 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
             info['raw_type'] = str(type_node)
         elif isinstance(type_node, Tree):
             info['type_name'] = type_node.data
+            # If this is a primitive type node, set raw_type to its string value
+            if type_node.data in {'int', 'string', 'bool', 'float', 'double'}:
+                info['raw_type'] = type_node.data
             if type_node.data == 'array_type':
                 if type_node.children:
                     info['element_type_raw'] = _extract_raw_type_info(type_node.children[0]).get('raw_type')
@@ -171,8 +174,9 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
                     key_info = _extract_raw_type_info(key_node)
                     value_info = _extract_raw_type_info(value_node)
                     print(f"[DEBUG] _extract_raw_type_info: key_info={key_info}, value_info={value_info}")
-                    info['map_key_type_raw'] = key_info.get('raw_type') or key_info.get('type_name') or '?'
-                    info['map_value_type_raw'] = value_info.get('raw_type') or value_info.get('type_name') or '?'
+                    # Prefer raw_type if set and not '?', else type_name
+                    info['map_key_type_raw'] = key_info.get('raw_type') if key_info.get('raw_type') not in (None, '?') else key_info.get('type_name') or '?'
+                    info['map_value_type_raw'] = value_info.get('raw_type') if value_info.get('raw_type') not in (None, '?') else value_info.get('type_name') or '?'
             elif type_node.data == 'compound_type':
                 if type_node.children:
                     base_type_node = type_node.children[0]

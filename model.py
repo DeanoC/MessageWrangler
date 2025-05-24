@@ -184,14 +184,13 @@ class Model:
             alias, rest = qfn_target.split('::', 1)
             if alias in self.imports and alias in self.alias_map:
                 real_ns = self.alias_map[alias]
-                rewritten_qfn = f"{real_ns}::{rest}"
+                # If real_ns is empty, just use rest as the QFN
+                if real_ns:
+                    rewritten_qfn = f"{real_ns}::{rest}"
+                else:
+                    rewritten_qfn = rest
                 print(f"[DEBUG] Model.resolve_reference: Delegating lookup of '{rewritten_qfn}' of kind '{kind}' to import '{alias}' (alias for '{real_ns}')")
                 imported_model = self.imports[alias]
                 return imported_model.resolve_reference(ModelReference(qfn=rewritten_qfn, kind=kind))
-                print(f"[DEBUG] Model.resolve_reference: Trying alias mapping: {qfn_target} -> {mapped_qfn}")
-                found = self._qfn_lookup.get((mapped_qfn, kind))
-                if found:
-                    print(f"[DEBUG] Model.resolve_reference: Found alias QFN match for {mapped_qfn}")
-                    return found
         print(f"[DEBUG] Model.resolve_reference: No match found for {qfn_target}")
         return None

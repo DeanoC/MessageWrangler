@@ -44,6 +44,8 @@ class EarlyModelToModelTransform:
                 'float': FieldType.FLOAT,
                 'double': FieldType.DOUBLE,
             }
+            # Debug: print type_name and type_type for map_field_type
+            print(f"[MAP_FIELD_TYPE DEBUG] type_name={type_name}, type_type={type_type}")
             # Use EarlyModel's type_type directly: if primitive, always map to FieldType
             if type_type == 'primitive':
                 return primitives.get(type_name, FieldType.STRING), type_name
@@ -57,8 +59,13 @@ class EarlyModelToModelTransform:
                     return FieldType.ENUM, type_name
                 return FieldType.ENUM, type_name
             elif type_type == 'message_type':
+                # Try direct match
                 if type_name in msg_lookup:
                     return FieldType.MESSAGE, type_name
+                # Try to match by suffix (unqualified name)
+                for qfn in msg_lookup.keys():
+                    if qfn.endswith(f'::{type_name}') or qfn == type_name:
+                        return FieldType.MESSAGE, qfn
                 return FieldType.MESSAGE, type_name
             elif type_type == 'compound_type':
                 return FieldType.COMPOUND, type_name
@@ -67,6 +74,10 @@ class EarlyModelToModelTransform:
             elif type_type == 'array_type':
                 return FieldType.ARRAY, type_name
             elif type_type == 'map_type':
+                # Only return FieldType.MAP if this is the top-level field (not for key/value)
+                # If the type_name is 'string', 'int', etc., treat as primitive
+                if type_name in primitives:
+                    return primitives.get(type_name, FieldType.STRING), type_name
                 return FieldType.MAP, type_name
             # fallback
             return FieldType.STRING, type_name
@@ -111,20 +122,33 @@ class EarlyModelToModelTransform:
                 type_names = []
                 inline_values = []
                 # Infer type_type for the top-level field
-                def infer_type_type(type_name):
+                def infer_type_type(type_name, type_type=None):
                     primitives = {'int', 'string', 'bool', 'float', 'double'}
                     if type_name in primitives:
                         return 'primitive'
                     if type_name in enum_lookup:
                         return 'enum_type'
-                    elif type_name in msg_lookup:
-                        return 'message_type'
+                    # If type_type is 'ref_type' but type_name matches a message, treat as message_type
+                    if (type_type == 'ref_type' or type_type is None):
+                        if type_name in msg_lookup:
+                            return 'message_type'
+                        for qfn in msg_lookup.keys():
+                            if qfn.endswith(f'::{type_name}') or qfn == type_name:
+                                return 'message_type'
                     return None
                 type_name = getattr(field, 'type_name', None)
-                type_type = getattr(field, 'type_type', None) or infer_type_type(type_name)
+                type_type = getattr(field, 'type_type', None)
+                # Debug: print type_name and type_type before inference
+                print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' initial type_name='{type_name}', type_type='{type_type}'")
+                # Always infer type_type if not set or is '?' or is 'ref_type'
+                if not type_type or type_type == '?' or type_type == 'ref_type':
+                    type_type = infer_type_type(type_name, type_type)
+                print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' after inference type_name='{type_name}', type_type='{type_type}'")
                 ftype, ref_qfn = map_field_type({'type_name': type_name, 'type_type': type_type})
-                # Base type
-                field_types.append(ftype)
+                print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' resolved ftype={ftype}, ref_qfn={ref_qfn}")
+                # Only append the top-level ftype for non-MAP fields
+                if ftype != FieldType.MAP:
+                    field_types.append(ftype)
                 type_ref = None
                 # ENUM
                 if ftype == FieldType.ENUM:
@@ -167,10 +191,12 @@ class EarlyModelToModelTransform:
                 # MESSAGE
                 elif ftype == FieldType.MESSAGE:
                     if ref_qfn:
-                        type_ref = msg_model_lookup.get(msg_lookup[ref_qfn])
+                        # Use ModelReference for message fields
+                        type_ref = ModelReference(ref_qfn, kind='message')
                         type_names.append(ref_qfn)
                     else:
                         type_names.append(type_name)
+                        type_ref = None
                     type_refs.append(type_ref)
                 # ARRAY
                 elif ftype == FieldType.ARRAY:
@@ -183,7 +209,8 @@ class EarlyModelToModelTransform:
                         element_type_ref = enum_model_lookup.get(enum_lookup[etype_ref_qfn])
                         type_names.append(etype_ref_qfn)
                     elif etype == FieldType.MESSAGE and etype_ref_qfn:
-                        element_type_ref = msg_model_lookup.get(msg_lookup[etype_ref_qfn])
+                        # Use ModelReference for array element if message
+                        element_type_ref = ModelReference(etype_ref_qfn, kind='message')
                         type_names.append(etype_ref_qfn)
                     else:
                         type_names.append(etype_raw)
@@ -193,29 +220,60 @@ class EarlyModelToModelTransform:
                 elif ftype == FieldType.MAP:
                     ktype_raw = getattr(field, 'map_key_type_raw', None)
                     vtype_raw = getattr(field, 'map_value_type_raw', None)
-                    ktype_type = infer_type_type(ktype_raw) if ktype_raw else None
-                    vtype_type = infer_type_type(vtype_raw) if vtype_raw else None
-                    ktype, ktype_ref_qfn = map_field_type({'type_name': ktype_raw, 'type_type': ktype_type}) if ktype_raw else (None, None)
-                    vtype, vtype_ref_qfn = map_field_type({'type_name': vtype_raw, 'type_type': vtype_type}) if vtype_raw else (None, None)
-                    field_types.extend([ktype, vtype])
+                    primitives = {'int', 'string', 'bool', 'float', 'double'}
+                    print(f"[MAP DEBUG] dict_field: ktype_raw={ktype_raw}, vtype_raw={vtype_raw}")
+                    # Key type
+                    if ktype_raw is not None:
+                        # Always treat primitives as 'primitive', never 'map_type' for keys
+                        if ktype_raw in primitives:
+                            ktype_type = 'primitive'
+                        else:
+                            ktype_type = infer_type_type(ktype_raw)
+                        # Defensive: if ktype_type is None, but ktype_raw is primitive, force to 'primitive'
+                        if not ktype_type and ktype_raw in primitives:
+                            ktype_type = 'primitive'
+                        # Defensive: if ktype_type is 'map_type', but ktype_raw is primitive, force to 'primitive'
+                        if ktype_type == 'map_type' and ktype_raw in primitives:
+                            ktype_type = 'primitive'
+                        print(f"[MAP DEBUG] dict_field: after infer, ktype_type={ktype_type}")
+                        print(f"[MAP DEBUG] ktype_raw={ktype_raw}, ktype_type={ktype_type}")
+                        ktype, ktype_ref_qfn = map_field_type({'type_name': ktype_raw, 'type_type': ktype_type})
+                        print(f"[MAP DEBUG] ktype result: ktype={ktype}, ktype_ref_qfn={ktype_ref_qfn}")
+                    else:
+                        ktype, ktype_ref_qfn = None, None
+                    # Value type
+                    if vtype_raw is not None:
+                        if vtype_raw in primitives:
+                            vtype_type = 'primitive'
+                        else:
+                            vtype_type = infer_type_type(vtype_raw)
+                        if not vtype_type and vtype_raw in primitives:
+                            vtype_type = 'primitive'
+                        if vtype_type == 'map_type' and vtype_raw in primitives:
+                            vtype_type = 'primitive'
+                        print(f"[MAP DEBUG] dict_field: after infer, vtype_type={vtype_type}")
+                        print(f"[MAP DEBUG] vtype_raw={vtype_raw}, vtype_type={vtype_type}")
+                        vtype, vtype_ref_qfn = map_field_type({'type_name': vtype_raw, 'type_type': vtype_type})
+                        print(f"[MAP DEBUG] vtype result: vtype={vtype}, vtype_ref_qfn={vtype_ref_qfn}")
+                    else:
+                        vtype, vtype_ref_qfn = None, None
+                    # Only three entries: [MAP, key_type, value_type]
+                    field_types.append(FieldType.MAP)
+                    field_types.append(ktype)
+                    field_types.append(vtype)
+                    type_names.append('MAP')
+                    type_names.append(ktype_raw)
+                    type_names.append(vtype_raw)
                     map_key_type_ref = None
                     map_value_type_ref = None
                     if ktype == FieldType.ENUM and ktype_ref_qfn:
                         map_key_type_ref = enum_model_lookup.get(enum_lookup[ktype_ref_qfn])
-                        type_names.append(ktype_ref_qfn)
                     elif ktype == FieldType.MESSAGE and ktype_ref_qfn:
                         map_key_type_ref = msg_model_lookup.get(msg_lookup[ktype_ref_qfn])
-                        type_names.append(ktype_ref_qfn)
-                    else:
-                        type_names.append(ktype_raw)
                     if vtype == FieldType.ENUM and vtype_ref_qfn:
                         map_value_type_ref = enum_model_lookup.get(enum_lookup[vtype_ref_qfn])
-                        type_names.append(vtype_ref_qfn)
                     elif vtype == FieldType.MESSAGE and vtype_ref_qfn:
-                        map_value_type_ref = msg_model_lookup.get(msg_lookup[vtype_ref_qfn])
-                        type_names.append(vtype_ref_qfn)
-                    else:
-                        type_names.append(vtype_raw)
+                        map_value_type_ref = ModelReference(vtype_ref_qfn, kind='message')
                     type_refs.append(None)  # MAP itself has no ref
                     type_refs.append(map_key_type_ref)
                     type_refs.append(map_value_type_ref)
@@ -310,15 +368,32 @@ class EarlyModelToModelTransform:
         # Build alias map and imports dict from imports_raw
         alias_map = {}
         imports_dict = {}
+        def build_ns_qfn(ns, prefix=None):
+            prefix = prefix or []
+            return '::'.join(prefix + [ns.name]) if ns.name else '::'.join(prefix)
+
         if hasattr(early_model, 'imports_raw') and hasattr(early_model, 'imports'):
+            print(f"[ALIAS DEBUG] early_model.file: {getattr(early_model, 'file', None)}")
+            print(f"[ALIAS DEBUG] early_model.imports_raw: {getattr(early_model, 'imports_raw', None)}")
+            print(f"[ALIAS DEBUG] early_model.imports keys: {list(getattr(early_model, 'imports', {}).keys())}")
+            print(f"[ALIAS DEBUG] alias_map after construction: {alias_map}")
             for import_path, alias in getattr(early_model, 'imports_raw', []):
                 key = alias if alias else import_path
                 imported_model = early_model.imports.get(key)
                 if imported_model:
-                    imports_dict[key] = EarlyModelToModelTransform().transform(imported_model)
-                if alias and imported_model and imported_model.namespaces:
-                    file_ns = imported_model.namespaces[0]
-                    alias_map[alias] = file_ns.name
+                    imported_model_obj = EarlyModelToModelTransform().transform(imported_model)
+                    imports_dict[key] = imported_model_obj
+                    print(f"[ALIAS DEBUG] alias: {alias}, imported_model_obj: {imported_model_obj}, namespaces: {[ns.name for ns in getattr(imported_model_obj, 'namespaces', [])]}")
+                    # Always map alias to the file-level namespace QFN (auto-generated or explicit)
+                    if alias and imported_model_obj.namespaces:
+                        file_ns = imported_model_obj.namespaces[0]
+                        file_ns_qfn = build_ns_qfn(file_ns)
+                        alias_map[alias] = file_ns_qfn
+                    # Also, if the imported model has its own alias_map, merge it in (for transitive aliases)
+                    if hasattr(imported_model_obj, 'alias_map') and imported_model_obj.alias_map:
+                        for k, v in imported_model_obj.alias_map.items():
+                            if k not in alias_map:
+                                alias_map[k] = v
         return Model(
             file=early_model.file,
             namespaces=model_namespaces,
