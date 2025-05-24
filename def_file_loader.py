@@ -114,7 +114,8 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
                     vdoc = "\n".join(v_doc_strings)
                     vcomment = vdoc
                     if vname is not None:
-                        values.append(EarlyEnumValue(vname, vval if vval is not None else 0, file, namespace, vline, comment=vcomment, doc=vdoc))
+                        # Only set value if explicitly present, else use None
+                        values.append(EarlyEnumValue(vname, vval, file, namespace, vline, comment=vcomment, doc=vdoc))
             elif isinstance(child_node, Tree) and child_node.data == 'enum_value': # Direct enum_value child (less common if list is used)
                 v_node = child_node
                 vname, vval = None, None
@@ -130,7 +131,8 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
                 vdoc = "\n".join(v_doc_strings)
                 vcomment = vdoc # Simplification for EarlyModel
                 if vname is not None:
-                    values.append(EarlyEnumValue(vname, vval if vval is not None else 0, file, namespace, vline, comment=vcomment, doc=vdoc))
+                    # Only set value if explicitly present, else use None
+                    values.append(EarlyEnumValue(vname, vval, file, namespace, vline, comment=vcomment, doc=vdoc))
 
         doc, comment = _extract_comments(enum_node, parent_children, node_index) # For the enum_def itself
 
@@ -165,24 +167,37 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
             elif type_node.data == 'map_type':
                 # Map type: Map < key , value >
                 # Children: [map_key_type, map_value_type]
-                print(f"[DEBUG] _extract_raw_type_info: map_type children: {[str(child) + ' (' + getattr(child, 'data', str(type(child))) + ')' for child in type_node.children]}")
+                # Defensive: flatten wrappers and handle missing children
+                key_node = None
+                value_node = None
                 if len(type_node.children) > 1:
                     key_node = type_node.children[0]
                     value_node = type_node.children[1]
-                    # Descend into map_key_type/map_value_type wrappers if present
-                    if hasattr(key_node, 'data') and key_node.data == 'map_key_type' and key_node.children:
-                        key_node = key_node.children[0]
-                    if hasattr(value_node, 'data') and value_node.data == 'map_value_type' and value_node.children:
-                        value_node = value_node.children[0]
-                    # Unwrap type_def for value_node if present
-                    if hasattr(value_node, 'data') and value_node.data == 'type_def' and value_node.children:
-                        value_node = value_node.children[0]
-                    key_info = _extract_raw_type_info(key_node)
-                    value_info = _extract_raw_type_info(value_node)
-                    print(f"[DEBUG] _extract_raw_type_info: key_info={key_info}, value_info={value_info}")
-                    # Prefer raw_type if set and not '?', else type_name
-                    info['map_key_type_raw'] = key_info.get('raw_type') if key_info.get('raw_type') not in (None, '?') else key_info.get('type_name') or '?'
-                    info['map_value_type_raw'] = value_info.get('raw_type') if value_info.get('raw_type') not in (None, '?') else value_info.get('type_name') or '?'
+                elif len(type_node.children) == 1:
+                    # Sometimes the parser may wrap both in a single child
+                    if hasattr(type_node.children[0], 'children') and len(type_node.children[0].children) == 2:
+                        key_node = type_node.children[0].children[0]
+                        value_node = type_node.children[0].children[1]
+                # Descend into map_key_type/map_value_type wrappers if present
+                if key_node and hasattr(key_node, 'data') and key_node.data == 'map_key_type' and key_node.children:
+                    key_node = key_node.children[0]
+                if value_node and hasattr(value_node, 'data') and value_node.data == 'map_value_type' and value_node.children:
+                    value_node = value_node.children[0]
+                # Unwrap type_def for key_node if present
+                if key_node and hasattr(key_node, 'data') and key_node.data == 'type_def' and key_node.children:
+                    key_node = key_node.children[0]
+                # Unwrap type_def for value_node if present
+                if value_node and hasattr(value_node, 'data') and value_node.data == 'type_def' and value_node.children:
+                    value_node = value_node.children[0]
+                key_info = _extract_raw_type_info(key_node) if key_node else {'raw_type': '?', 'type_name': '?'}
+                value_info = _extract_raw_type_info(value_node) if value_node else {'raw_type': '?', 'type_name': '?'}
+                # Prefer raw_type if set and not '?', else type_name
+                info['map_key_type_raw'] = key_info.get('raw_type') if key_info.get('raw_type') not in (None, '?') else key_info.get('type_name') or '?'
+                info['map_value_type_raw'] = value_info.get('raw_type') if value_info.get('raw_type') not in (None, '?') else value_info.get('type_name') or '?'
+                # Set the type_name for the map itself
+                key_type_str = info.get('map_key_type_raw', '?')
+                value_type_str = info.get('map_value_type_raw', '?')
+                info['type_name'] = f"Map<{key_type_str}, {value_type_str}>"
             elif type_node.data == 'compound_type':
                 if type_node.children:
                     base_type_node = type_node.children[0]
@@ -195,14 +210,13 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
                     else:
                         info['compound_base_type_raw'] = 'UNKNOWN'
 
-                    for child in type_node.children:
-                        if isinstance(child, Tree) and child.data == 'compound_component_seq':
-                            for comp_item in (n for n in child.iter_subtrees() if getattr(n, 'data', None) == 'compound_component_item'):
-                                for name_token in comp_item.children:
-                                    if isinstance(name_token, Token) and name_token.type == 'NAME':
-                                        info['compound_components_raw'].append(str(name_token))
-                            break
-
+                for child in type_node.children:
+                    if isinstance(child, Tree) and child.data == 'compound_component_seq':
+                        for comp_item in (n for n in child.iter_subtrees() if getattr(n, 'data', None) == 'compound_component_item'):
+                            for name_token in comp_item.children:
+                                if isinstance(name_token, Token) and name_token.type == 'NAME':
+                                    info['compound_components_raw'].append(str(name_token))
+                        break
             elif type_node.data == 'ref_type':
                 # Handle qualified_name_with_dot (usual case)
                 if type_node.children and isinstance(type_node.children[0], Tree) and type_node.children[0].data == 'qualified_name_with_dot':
@@ -423,12 +437,21 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
         type_info = _extract_raw_type_info(type_def_node.children[0] if type_def_node and type_def_node.children else None)
 
 
+
         # Patch: type_name is the type string (prefer referenced_name_raw, then raw_type, then type_type)
         type_name = type_info.get('referenced_name_raw') or type_info.get('raw_type') or type_info.get('type_name', '?')
 
-        # If this is a compound, set type_type to 'compound', else use primitive/other logic
-        if type_info.get('compound_base_type_raw') and type_info.get('compound_components_raw'):
+        # Set type_type for map/array/compound/enum/options
+        if type_info.get('map_key_type_raw') is not None or type_info.get('map_value_type_raw') is not None:
+            type_type = 'map_type'
+        elif type_info.get('element_type_raw') is not None:
+            type_type = 'array_type'
+        elif type_info.get('compound_base_type_raw') and type_info.get('compound_components_raw'):
             type_type = 'compound'
+        elif type_info.get('is_inline_enum', False):
+            type_type = 'enum_type'
+        elif type_info.get('is_inline_options', False):
+            type_type = 'options_type'
         else:
             primitives = {'int', 'float', 'string', 'bool', 'double'}
             if type_name in primitives:

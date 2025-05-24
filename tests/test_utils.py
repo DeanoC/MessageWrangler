@@ -49,6 +49,7 @@ def load_early_model_with_imports(def_file_path):
     # Alias wrapping is not needed; aliasing is handled at reference resolution time only.
 
     transformed = {}
+    from early_model_transforms.promote_inline_enums_transform import PromoteInlineEnumsTransform
     for model in sorted_models:
         # Build import_models for this model (already transformed)
         import_models = {}
@@ -63,9 +64,16 @@ def load_early_model_with_imports(def_file_path):
             AddFileLevelNamespaceTransform(),
             CanonicalizeColonsTransform(),
             QfnReferenceTransform(),
-            AttachImportedModelsTransform(import_models)
+            AttachImportedModelsTransform(import_models),
+            PromoteInlineEnumsTransform(),
         ]
         model_t = run_early_transform_pipeline(model, transforms)
+        # Validation: ensure no inline enums remain after transform
+        for ns in getattr(model_t, 'namespaces', []):
+            for msg in getattr(ns, 'messages', []):
+                for field in getattr(msg, 'fields', []):
+                    assert not getattr(field, 'is_inline_enum', False), f"Field {field.name} in {msg.name} should not be inline enum after PromoteInlineEnumsTransform"
+                    assert not getattr(field, 'inline_values_raw', None), f"Field {field.name} in {msg.name} should not have inline_values_raw after PromoteInlineEnumsTransform"
         transformed[model_file] = model_t
 
     # Step 4: Return the transformed root EarlyModel and all transformed models

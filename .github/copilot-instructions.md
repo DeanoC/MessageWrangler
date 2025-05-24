@@ -24,3 +24,6 @@ Once a Model is created, it the input to the generators.
 4. (TODO) C++ generator - generates C++ code from the Model has several variants:
    - (TODO) C++ std20 - generates C++ source files using C++20 features
    - (TODO) C++ unreal5 - generates C++ source files for Unreal Engine 5
+
+
+When debugging, always challenge your assumptions. Verify that the input where the error happens is valid. Use prior test and debug print to validate you are getting what you think you shoulld.

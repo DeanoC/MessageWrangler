@@ -1,6 +1,7 @@
 """
 Transform: Converts a fully-resolved EarlyModel into a concrete Model for code generation.
 """
+import sys
 from early_model import EarlyModel
 from model import Model, ModelNamespace, ModelMessage, ModelEnum, ModelField, ModelEnumValue, FieldType, FieldModifier
 from model import ModelReference
@@ -14,6 +15,8 @@ class EarlyModelToModelTransform:
         # First, build a lookup of all enums and messages by QFN for reference resolution
         enum_lookup = {}
         msg_lookup = {}
+        import sys
+        print("[DEBUG] Building enum/message lookup", file=sys.stderr)
         def build_lookup_ns(ns, prefix):
             ns_qfn = '::'.join(prefix + [ns.name]) if ns.name else '::'.join(prefix)
             for enum in ns.enums:
@@ -24,8 +27,18 @@ class EarlyModelToModelTransform:
                 msg_lookup[qfn] = msg
             for nested in ns.namespaces:
                 build_lookup_ns(nested, prefix + [ns.name] if ns.name else prefix)
+
+        # Register enums and inline enums from the current model
         for ns in early_model.namespaces:
             build_lookup_ns(ns, [])
+
+        # Register enums and inline enums from all imported models (recursively)
+        if hasattr(early_model, 'imports') and early_model.imports:
+            for imported_model in early_model.imports.values():
+                for ns in getattr(imported_model, 'namespaces', []):
+                    build_lookup_ns(ns, [])
+
+        print(f"[DEBUG] enum_lookup keys: {list(enum_lookup.keys())}", file=sys.stderr)
 
         # Helper to map raw type to FieldType enum
         def map_field_type(field):
@@ -82,9 +95,119 @@ class EarlyModelToModelTransform:
             # fallback
             return FieldType.STRING, type_name
 
+        # Build alias map and imports dict from imports_raw
+        alias_map = {}
+        imports_dict = {}
+        def build_ns_qfn(ns, prefix=None):
+            prefix = prefix or []
+            return '::'.join(prefix + [ns.name]) if ns.name else '::'.join(prefix)
+
+        if hasattr(early_model, 'imports_raw') and hasattr(early_model, 'imports'):
+            print(f"[ALIAS DEBUG] early_model.file: {getattr(early_model, 'file', None)}")
+            print(f"[ALIAS DEBUG] early_model.imports_raw: {getattr(early_model, 'imports_raw', None)}")
+            print(f"[ALIAS DEBUG] early_model.imports keys: {list(getattr(early_model, 'imports', {}).keys())}")
+            print(f"[ALIAS DEBUG] alias_map after construction: {alias_map}")
+            for import_path, alias in getattr(early_model, 'imports_raw', []):
+                key = alias if alias else import_path
+                imported_model = early_model.imports.get(key)
+                if imported_model:
+                    imported_model_obj = EarlyModelToModelTransform().transform(imported_model)
+                    imports_dict[key] = imported_model_obj
+                    print(f"[ALIAS DEBUG] alias: {alias}, imported_model_obj: <Model object>, namespaces: {[ns.name for ns in getattr(imported_model_obj, 'namespaces', [])]}")
+                    # Always map alias to the file-level namespace QFN (auto-generated or explicit)
+                    if alias and imported_model_obj.namespaces:
+                        file_ns = imported_model_obj.namespaces[0]
+                        file_ns_qfn = build_ns_qfn(file_ns)
+                        alias_map[alias] = file_ns_qfn
+                    # Also, if the imported model has its own alias_map, merge it in (for transitive aliases)
+                    if hasattr(imported_model_obj, 'alias_map') and imported_model_obj.alias_map:
+                        for k, v in imported_model_obj.alias_map.items():
+                            if k not in alias_map:
+                                alias_map[k] = v
+
         # Convert enums
         enum_model_lookup = {}
         def convert_enum(enum, parent=None):
+            # Resolve parent if not provided
+            resolved_parent = parent
+            parent_raw = getattr(enum, 'parent_raw', None)
+            import sys
+            print(f"[DEBUG] convert_enum: enum.name={getattr(enum, 'name', None)}, parent_raw={parent_raw}", file=sys.stderr)
+            # Map parent_raw using alias_map if it starts with an alias
+            mapped_parent_raw = parent_raw
+            if parent_raw and isinstance(parent_raw, str) and '::' in parent_raw and alias_map:
+                first = parent_raw.split('::', 1)[0]
+                if first in alias_map:
+                    mapped_parent_raw = alias_map[first] + '::' + parent_raw.split('::', 1)[1]
+                    print(f"[DEBUG] Mapped parent_raw '{parent_raw}' to '{mapped_parent_raw}' using alias_map", file=sys.stderr)
+            else:
+                mapped_parent_raw = parent_raw
+            if mapped_parent_raw and parent is None:
+                import sys
+                print(f"[ENUM PARENT DEBUG] Trying to resolve parent_raw='{mapped_parent_raw}'", file=sys.stderr)
+
+                # Try to resolve in the main enum_lookup (contains EarlyEnums from current and imported models)
+                target_qfn = mapped_parent_raw
+
+                # Check if the reference looks like a promoted inline enum (Namespace::Message::fieldName)
+                # and convert it to the promoted name format (Namespace::Message_fieldName)
+                if '::' in target_qfn:
+                    parts = target_qfn.split('::')
+                    if len(parts) >= 2:
+                        # Assuming the format is Namespace::Message::fieldName
+                        # The promoted name would be Namespace::Message_fieldName
+                        potential_promoted_qfn = '::'.join(parts[:-1]) + '_' + parts[-1]
+                        # Check if this potential promoted QFN exists in the enum_lookup
+                        if potential_promoted_qfn in enum_lookup:
+                            target_qfn = potential_promoted_qfn
+                            print(f"[ENUM PARENT DEBUG] Mapped inline enum reference '{mapped_parent_raw}' to promoted QFN '{target_qfn}'", file=sys.stderr)
+
+
+                # Try to resolve in the main enum_lookup (contains EarlyEnums from current and imported models)
+                if target_qfn in enum_lookup:
+                    candidate_early_enum = enum_lookup[target_qfn]
+                    # Now find the corresponding ModelEnum. It could be in the current model's lookup
+                    # or in an imported model's lookup.
+                    resolved_parent = enum_model_lookup.get(candidate_early_enum)
+
+                    if resolved_parent:
+                        print(f"[ENUM PARENT DEBUG] Resolved enum parent for '{mapped_parent_raw}' (looked up as '{target_qfn}') via local enum_model_lookup", file=sys.stderr)
+                    else:
+                        # If not found in the current model's lookup, search in imported models' lookups
+                        print(f"[ENUM PARENT DEBUG] Parent '{mapped_parent_raw}' (looked up as '{target_qfn}') not found in local enum_model_lookup. Searching imported models.", file=sys.stderr)
+                        for imported_model_obj in imports_dict.values():
+                            # Access the enum_model_lookup of the imported model
+                            # Note: Model objects don't directly expose enum_model_lookup,
+                            # so we need to search its namespaces.
+                            def find_enum_in_model(model, target_qfn):
+                                def search_ns(ns_list, current_qfn_parts):
+                                    for ns in ns_list:
+                                        ns_name = ns.name if ns.name else ""
+                                        current_ns_qfn = '::'.join(current_qfn_parts + [ns_name]) if ns_name else '::'.join(current_qfn_parts)
+                                        # Check enums in the current namespace
+                                        for enum in getattr(ns, 'enums', []):
+                                            enum_qfn = current_ns_qfn + '::' + enum.name if current_ns_qfn else enum.name
+                                            if enum_qfn == target_qfn:
+                                                return enum
+                                        # Recurse into nested namespaces
+                                        found_in_nested = search_ns(getattr(ns, 'namespaces', []), current_qfn_parts + [ns_name] if ns_name else current_qfn_parts)
+                                        if found_in_nested:
+                                            return found_in_nested
+                                    return None
+                                # Start search from the top-level namespaces of the imported model
+                                return search_ns(getattr(model, 'namespaces', []), [])
+
+                            resolved_parent = find_enum_in_model(imported_model_obj, target_qfn)
+                            if resolved_parent:
+                                print(f"[ENUM PARENT DEBUG] Resolved imported enum parent '{mapped_parent_raw}' (looked up as '{target_qfn}') in imported model.", file=sys.stderr)
+                                break # Found the parent, no need to search other imported models
+
+                if resolved_parent:
+                    print(f"[ENUM PARENT DEBUG] Final resolved parent for '{getattr(enum, 'name', None)}': {getattr(resolved_parent, 'name', None)}", file=sys.stderr)
+                else:
+                    print(f"[ENUM PARENT DEBUG] Could not resolve parent for '{getattr(enum, 'name', None)}' (raw: {parent_raw}, looked up as: {target_qfn})", file=sys.stderr)
+
+            # ... rest of the function ...
             values = [
                 ModelEnumValue(
                     v.name,
@@ -100,7 +223,7 @@ class EarlyModelToModelTransform:
                 name=enum.name,
                 values=values,
                 is_open=getattr(enum, 'is_open_raw', False),
-                parent=parent,
+                parent=resolved_parent,
                 doc=getattr(enum, 'doc', None),
                 comment=getattr(enum, 'comment', None),
                 parent_raw=getattr(enum, 'parent_raw', None),
@@ -115,6 +238,9 @@ class EarlyModelToModelTransform:
         msg_model_lookup = {}
         def convert_message(msg, parent=None):
             fields = []
+            # To add inline enums to the containing namespace
+            containing_ns = getattr(msg, 'parent_container', None)
+            ns_for_inline = containing_ns if containing_ns else ns  # fallback to current ns
             for field in getattr(msg, 'fields', []):
                 # Build the field_types, type_refs, and type_names arrays
                 field_types = []
@@ -138,55 +264,90 @@ class EarlyModelToModelTransform:
                     return None
                 type_name = getattr(field, 'type_name', None)
                 type_type = getattr(field, 'type_type', None)
-                # Debug: print type_name and type_type before inference
-                print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' initial type_name='{type_name}', type_type='{type_type}'")
-                # Always infer type_type if not set or is '?' or is 'ref_type'
-                if not type_type or type_type == '?' or type_type == 'ref_type':
-                    type_type = infer_type_type(type_name, type_type)
-                print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' after inference type_name='{type_name}', type_type='{type_type}'")
-                ftype, ref_qfn = map_field_type({'type_name': type_name, 'type_type': type_type})
-                print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' resolved ftype={ftype}, ref_qfn={ref_qfn}")
-                # Only append the top-level ftype for non-MAP fields
-                if ftype != FieldType.MAP:
-                    field_types.append(ftype)
+                # Special handling for map_type: always treat as map, even if type_name is '?'
+                if (type_type == 'map_type' or getattr(field, 'raw_type', None) == 'map_type'):
+                    ftype = FieldType.MAP  # Ensure ftype is always set for map_type fields
+                    ktype_raw = getattr(field, 'map_key_type_raw', None)
+                    vtype_raw = getattr(field, 'map_value_type_raw', None)
+                    primitives = {'int', 'string', 'bool', 'float', 'double'}
+                    # Key type
+                    if ktype_raw is not None:
+                        if ktype_raw in primitives:
+                            ktype_type = 'primitive'
+                        else:
+                            ktype_type = infer_type_type(ktype_raw)
+                        if not ktype_type and ktype_raw in primitives:
+                            ktype_type = 'primitive'
+                        if ktype_type == 'map_type' and ktype_raw in primitives:
+                            ktype_type = 'primitive'
+                        ktype, ktype_ref_qfn = map_field_type({'type_name': ktype_raw, 'type_type': ktype_type})
+                    else:
+                        ktype, ktype_ref_qfn = None, None
+                    # Value type
+                    if vtype_raw is not None:
+                        if vtype_raw in primitives:
+                            vtype_type = 'primitive'
+                        else:
+                            vtype_type = infer_type_type(vtype_raw)
+                        if not vtype_type and vtype_raw in primitives:
+                            vtype_type = 'primitive'
+                        if vtype_type == 'map_type' and vtype_raw in primitives:
+                            vtype_type = 'primitive'
+                        vtype, vtype_ref_qfn = map_field_type({'type_name': vtype_raw, 'type_type': vtype_type})
+                    else:
+                        vtype, vtype_ref_qfn = None, None
+                    field_types.append(FieldType.MAP)
+                    field_types.append(ktype)
+                    field_types.append(vtype)
+                    type_names.append('MAP')
+                    type_names.append(ktype_raw)
+                    type_names.append(vtype_raw)
+                    map_key_type_ref = None
+                    map_value_type_ref = None
+                    if ktype == FieldType.ENUM and ktype_ref_qfn:
+                        map_key_type_ref = enum_model_lookup.get(enum_lookup[ktype_ref_qfn])
+                    if vtype == FieldType.ENUM and vtype_ref_qfn:
+                        map_value_type_ref = enum_model_lookup.get(enum_lookup[vtype_ref_qfn])
+                    elif vtype == FieldType.MESSAGE and vtype_ref_qfn:
+                        map_value_type_ref = ModelReference(vtype_ref_qfn, kind='message')
+                    type_refs.append(None)  # MAP itself has no ref
+                    type_refs.append(map_key_type_ref)
+                    type_refs.append(map_value_type_ref)
+                else:
+                    # Defensive: If type_name is '?' or None, treat as invalid and skip enum/message resolution
+                    if type_name == '?' or type_name is None:
+                        print(f"[MODEL ERROR] Field '{getattr(field, 'name', '?')}' in message '{msg.name}' has invalid type_name ('?'). Skipping enum/message resolution.")
+                        ftype, ref_qfn = FieldType.STRING, type_name
+                    else:
+                        # Debug: print type_name and type_type before inference
+                        print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' initial type_name='{type_name}', type_type='{type_type}'")
+                        # Always infer type_type if not set or is '?' or is 'ref_type'
+                        if not type_type or type_type == '?' or type_type == 'ref_type':
+                            type_type = infer_type_type(type_name, type_type)
+                        print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' after inference type_name='{type_name}', type_type='{type_type}'")
+                        ftype, ref_qfn = map_field_type({'type_name': type_name, 'type_type': type_type})
+                        print(f"[MODEL DEBUG] Field '{getattr(field, 'name', '?')}' resolved ftype={ftype}, ref_qfn={ref_qfn}")
+                    # Only append the top-level ftype for non-MAP fields
+                    if ftype != FieldType.MAP:
+                        field_types.append(ftype)
                 type_ref = None
                 # ENUM
                 if ftype == FieldType.ENUM:
-                    if getattr(field, 'is_inline_enum', False):
-                        inline_enum_name = f"{msg.name}_{field.name}_InlineEnum"
-                        inline_enum_values = [
-                            ModelEnumValue(
-                                v.get('name', '?'),
-                                v.get('value', None),
-                                doc=v.get('doc', None),
-                                comment=v.get('comment', None),
-                                file=v.get('file', None),
-                                line=v.get('line', None),
-                                namespace=v.get('namespace', None)
-                            ) for v in getattr(field, 'inline_values_raw', [])
-                        ]
-                        inline_enum = ModelEnum(
-                            name=inline_enum_name,
-                            values=inline_enum_values,
-                            is_open=False,
-                            parent=None,
-                            doc=getattr(field, 'doc', None),
-                            comment=getattr(field, 'comment', None),
-                            parent_raw=None,
-                            file=getattr(field, 'file', None),
-                            line=getattr(field, 'line', None),
-                            namespace=getattr(field, 'namespace', None)
-                        )
-                        type_ref = inline_enum
-                        type_names.append(inline_enum_name)
-                        if not hasattr(msg, '_inline_enums'):
-                            msg._inline_enums = []
-                        msg._inline_enums.append(inline_enum)
-                    elif ref_qfn:
+                    # Inline enums are promoted, so this field should always reference a top-level enum.
+                    if ref_qfn and ref_qfn in enum_lookup:
                         type_ref = enum_model_lookup.get(enum_lookup[ref_qfn])
                         type_names.append(ref_qfn)
                     else:
-                        type_names.append(type_name)
+                        # Try to find a promoted inline enum by name pattern
+                        promoted_name = f"{msg.name}_{field.name}"
+                        promoted_enum = next((e for e in ns_for_inline.enums if e.name == promoted_name), None)
+                        if promoted_enum:
+                            type_ref = promoted_enum
+                            type_names.append(promoted_name)
+                        else:
+                            print(f"[MODEL ERROR] Field '{getattr(field, 'name', '?')}' in message '{msg.name}' references unknown enum '{ref_qfn}'. Skipping type_ref.")
+                            type_names.append(type_name)
+                            type_ref = None
                     type_refs.append(type_ref)
                 # MESSAGE
                 elif ftype == FieldType.MESSAGE:
@@ -281,20 +442,38 @@ class EarlyModelToModelTransform:
                     # Base types, compounds, options, etc.
                     type_refs.append(None)
                     type_names.append(type_name)
-                # Handle inline enums/options for the field
+                # Promote inline enums/options to top-level enums in the containing namespace
                 if getattr(field, 'inline_values_raw', None):
-                    for v in field.inline_values_raw:
-                        inline_values.append(
-                            ModelEnumValue(
-                                v.get('name', '?'),
-                                v.get('value', None),
-                                doc=v.get('doc', None),
-                                comment=v.get('comment', None),
-                                file=v.get('file', None),
-                                line=v.get('line', None),
-                                namespace=v.get('namespace', None)
-                            )
-                        )
+                    enum_name = f"{msg.name}_{field.name}"
+                    enum_values = [
+                        ModelEnumValue(
+                            v.get('name', '?'),
+                            v.get('value', None),
+                            doc=v.get('doc', None),
+                            comment=v.get('comment', None),
+                            file=v.get('file', None),
+                            line=v.get('line', None),
+                            namespace=v.get('namespace', None)
+                        ) for v in field.inline_values_raw
+                    ]
+                    model_enum = ModelEnum(
+                        name=enum_name,
+                        values=enum_values,
+                        is_open=False,
+                        parent=None,
+                        doc=None,
+                        comment=None,
+                        parent_raw=None,
+                        file=getattr(field, 'file', None),
+                        line=getattr(field, 'line', None),
+                        namespace=getattr(field, 'namespace', None)
+                    )
+                    # Add to containing namespace's enums if not already present
+                    if not any(e.name == enum_name for e in ns_for_inline.enums):
+                        ns_for_inline.enums.append(model_enum)
+                    # Set type_ref to this enum
+                    type_ref = model_enum
+                    type_names.append(enum_name)
                 # Map modifiers_raw (list of str) to FieldModifier enum values
                 modifiers_raw = getattr(field, 'modifiers_raw', [])
                 modifiers = []
@@ -322,7 +501,7 @@ class EarlyModelToModelTransform:
                     default=getattr(field, 'default_value_raw', None),
                     doc=getattr(field, 'doc', None),
                     comment=getattr(field, 'comment', None),
-                    inline_values=inline_values,
+                    inline_values=[],  # Inline enums are now promoted
                     file=getattr(field, 'file', None),
                     line=getattr(field, 'line', None),
                     namespace=getattr(field, 'namespace', None),
@@ -351,6 +530,7 @@ class EarlyModelToModelTransform:
 
         # Convert namespaces recursively
         def convert_namespace(ns):
+            print(f"[DEBUG] Model transform: enums in namespace '{ns.name}': {[e.name for e in ns.enums]}", file=sys.stderr)
             enums = [convert_enum(e) for e in getattr(ns, 'enums', [])]
             messages = [convert_message(m) for m in getattr(ns, 'messages', [])]
             namespaces = [convert_namespace(n) for n in getattr(ns, 'namespaces', [])]
@@ -409,35 +589,6 @@ class EarlyModelToModelTransform:
 
         options = collect_options_from_namespaces(getattr(early_model, 'namespaces', []))
         compounds = getattr(early_model, 'compounds', [])
-        # Build alias map and imports dict from imports_raw
-        alias_map = {}
-        imports_dict = {}
-        def build_ns_qfn(ns, prefix=None):
-            prefix = prefix or []
-            return '::'.join(prefix + [ns.name]) if ns.name else '::'.join(prefix)
-
-        if hasattr(early_model, 'imports_raw') and hasattr(early_model, 'imports'):
-            print(f"[ALIAS DEBUG] early_model.file: {getattr(early_model, 'file', None)}")
-            print(f"[ALIAS DEBUG] early_model.imports_raw: {getattr(early_model, 'imports_raw', None)}")
-            print(f"[ALIAS DEBUG] early_model.imports keys: {list(getattr(early_model, 'imports', {}).keys())}")
-            print(f"[ALIAS DEBUG] alias_map after construction: {alias_map}")
-            for import_path, alias in getattr(early_model, 'imports_raw', []):
-                key = alias if alias else import_path
-                imported_model = early_model.imports.get(key)
-                if imported_model:
-                    imported_model_obj = EarlyModelToModelTransform().transform(imported_model)
-                    imports_dict[key] = imported_model_obj
-                    print(f"[ALIAS DEBUG] alias: {alias}, imported_model_obj: {imported_model_obj}, namespaces: {[ns.name for ns in getattr(imported_model_obj, 'namespaces', [])]}")
-                    # Always map alias to the file-level namespace QFN (auto-generated or explicit)
-                    if alias and imported_model_obj.namespaces:
-                        file_ns = imported_model_obj.namespaces[0]
-                        file_ns_qfn = build_ns_qfn(file_ns)
-                        alias_map[alias] = file_ns_qfn
-                    # Also, if the imported model has its own alias_map, merge it in (for transitive aliases)
-                    if hasattr(imported_model_obj, 'alias_map') and imported_model_obj.alias_map:
-                        for k, v in imported_model_obj.alias_map.items():
-                            if k not in alias_map:
-                                alias_map[k] = v
         return Model(
             file=early_model.file,
             namespaces=model_namespaces,
