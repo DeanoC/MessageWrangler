@@ -4,6 +4,8 @@ Message Model
 This module defines the intermediate representation for message definitions.
 It provides classes for representing messages, fields, enums, namespaces, and other components
 of the message definition format.
+THIS IS DEPRECATED AND WILL BE REMOVED IN A FUTURE RELEASE.
+The new model is defined in the `model.py` file.
 """
 
 from typing import Dict, List, Optional, Any, Union
