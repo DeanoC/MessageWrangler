@@ -351,22 +351,43 @@ def generate_python3_code(model: Model, module_name: str = "messages", transform
                 lines.append(f"{subindent}{enum_name} = {enum_name}")
             for msg_name in msg_names:
                 lines.append(f"{subindent}{msg_name} = {msg_name}")
-            # Emit file-level aliases for referenced types (e.g., inline enums) as class attributes
-            for local_name, class_name in file_level_aliases.items():
-                if local_name != class_name:
-                    lines.append(f"{subindent}{local_name} = {class_name}")
-            for full_name, class_name in file_level_full_aliases.items():
-                if full_name != class_name:
-                    lines.append(f"{subindent}{full_name} = {class_name}")
-        # Also emit these aliases at the module level for direct import (after the class definition)
+        # Only emit file-level aliases at the module level for direct import (after the class definition)
         if not class_path and ns.name:
+            def build_full_class_path(class_name):
+                # Search for the class in the namespace tree and build its full path
+                def find_in_ns(ns, name, path):
+                    # Search enums
+                    for enum in getattr(ns, 'enums', []):
+                        if get_local_name(enum.name, ns.name) == name or enum.name == name:
+                            return path + [ns.name] if ns.name else path, name
+                    # Search messages
+                    for msg in getattr(ns, 'messages', []):
+                        if get_local_name(msg.name, ns.name) == name or msg.name == name:
+                            return path + [ns.name] if ns.name else path, name
+                    # Search nested namespaces
+                    for nested in getattr(ns, 'namespaces', []):
+                        found = find_in_ns(nested, name, path + ([ns.name] if ns.name else []))
+                        if found:
+                            return found
+                    return None
+                result = find_in_ns(ns, class_name, [])
+                if result:
+                    ns_path, name = result
+                    # Remove empty strings from ns_path
+                    ns_path = [p for p in ns_path if p]
+                    return '.'.join([ns.name] + ns_path[1:] + [class_name]) if ns.name else '.'.join(ns_path + [class_name])
+                else:
+                    return f"{ns.name}.{class_name}" if ns.name else class_name
+
             module_level_aliases = []
             for local_name, class_name in file_level_aliases.items():
                 if local_name != class_name:
-                    module_level_aliases.append((local_name, f"{ns.name}.{class_name}"))
+                    target = build_full_class_path(class_name)
+                    module_level_aliases.append((local_name, target))
             for full_name, class_name in file_level_full_aliases.items():
                 if full_name != class_name:
-                    module_level_aliases.append((full_name, f"{ns.name}.{class_name}"))
+                    target = build_full_class_path(class_name)
+                    module_level_aliases.append((full_name, target))
             if module_level_aliases:
                 lines.append("")
                 for alias, target in module_level_aliases:

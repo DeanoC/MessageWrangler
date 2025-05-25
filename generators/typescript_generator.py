@@ -1,63 +1,219 @@
 """
-TypeScript code generator for MessageWrangler message definitions.
-Mirrors the structure and features of the Python v3 generator.
+TypeScript generator for Model (new system).
+Outputs TypeScript interfaces and enums for all messages and enums in the Model.
 """
+from model import Model
+from typing import List, Callable
 
+from model_transforms.flatten_imports_transform import FlattenImportsTransform
+from model_transforms.assign_unique_names_transform import AssignUniqueNamesTransform
+from model_transforms.flatten_enums_transform import FlattenEnumsTransform
 
-from typing import List, Dict, Set, Optional
-from message_model import MessageModel, Field, Enum, CompoundField, Namespace, Message
-from generators.generator_utils import get_typescript_type, get_local_name, get_qualified_name, collect_referenced_imports
+def generate_typescript_code(model: Model, module_name: str = "messages", transforms: List[Callable] = None):
+    # Track emitted inline enums to avoid duplicates
+    emitted_inline_enums = set()
 
-def generate_enum(enum: Enum) -> str:
-    lines = [f"export enum {enum.name} {{"]
-    for value in enum.values:
-        lines.append(f"    {value.name} = {value.value},")
-    lines.append("}")
-    return '\n'.join(lines)
+    # Apply enum value assignment and enum flattening so all enums/messages have a flat, unique name and values are set
+    from model_transforms.assign_enum_values_transform import AssignEnumValuesTransform
+    model = AssignEnumValuesTransform().transform(model)
+    model = FlattenEnumsTransform().transform(model)
 
-def generate_compound(comp: CompoundField, imports: Set[str], current_ns: str) -> str:
-    lines = [f"export interface {comp.name} {{"]
-    for component in comp.components:
-        # Each component is just a name, type is the base_type
-        ts_type = get_typescript_type(comp)
-        lines.append(f"    {component}: {ts_type};")
-    lines.append("}")
-    return '\n'.join(lines)
+    lines = []
 
-def generate_message(msg: Message, imports: Set[str], current_ns: str) -> str:
-    base = f" extends {msg.parent}" if getattr(msg, 'parent', None) else ""
-    lines = [f"export interface {msg.name}{base} {{"]
-    for field in getattr(msg, 'fields', []):
-        ts_type = get_typescript_type(field)
-        lines.append(f"    {field.name}: {ts_type};")
-    lines.append("}")
-    return '\n'.join(lines)
+    # --- Collect external type references for imports ---
+    import_map = {}  # file_base -> set(type_names)
+    current_file_base = None
+    if hasattr(model, 'file') and model.file:
+        import os
+        current_file_base = os.path.splitext(os.path.basename(model.file))[0]
 
-def generate_namespace(ns: Namespace) -> str:
-    imports: Set[str] = collect_referenced_imports(ns)
-    body: List[str] = []
-    for enum in getattr(ns, 'enums', {}).values() if hasattr(ns, 'enums') else []:
-        body.append(generate_enum(enum))
-        body.append("")
-    for comp in getattr(ns, 'compounds', {}).values() if hasattr(ns, 'compounds') else []:
-        body.append(generate_compound(comp, imports, ns.name))
-        body.append("")
-    for msg in getattr(ns, 'messages', {}).values() if hasattr(ns, 'messages') else []:
-        body.append(generate_message(msg, imports, ns.name))
-        body.append("")
-    import_lines = []
-    for imp in sorted(imports):
-        if imp != ns.name:
-            import_lines.append(f"import * as {imp} from './{imp}';")
-    return '\n'.join(import_lines + [f"export namespace {ns.name} {{"] + ["    " + line if line else "" for line in body] + ["}"])
+    def collect_imports_from_field(field):
+        for ftype, tref in zip(field.field_types, field.type_refs):
+            if ftype.name in ("ENUM", "MESSAGE") and tref is not None:
+                # tref may have .file or .namespace
+                ref_file = getattr(tref, 'file', None)
+                ref_name = getattr(tref, 'name', None)
+                if ref_file and ref_name:
+                    ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
+                    if ref_file_base != current_file_base:
+                        import_map.setdefault(ref_file_base, set()).add(ref_name)
 
-def generate_typescript_code(namespaces: List[Namespace]) -> Dict[str, str]:
-    """
-    Generate TypeScript code for all namespaces.
-    Returns a dict: {filename: code}
-    """
-    result = {}
-    for ns in namespaces:
-        code = generate_namespace(ns)
-        result[f"{ns.name}.ts"] = code
-    return result
+    def collect_imports_from_ns(ns):
+        for msg in getattr(ns, 'messages', []):
+            for field in getattr(msg, 'fields', []):
+                collect_imports_from_field(field)
+        for nested in getattr(ns, 'namespaces', []):
+            collect_imports_from_ns(nested)
+
+    for ns in getattr(model, 'namespaces', []):
+        collect_imports_from_ns(ns)
+
+    # --- Emit import statements ---
+    for import_file, type_names in sorted(import_map.items()):
+        type_list = ', '.join(sorted(type_names))
+        lines.append(f"import {{ {type_list} }} from './{import_file}';")
+    if import_map:
+        lines.append("")
+
+    def get_local_name(name, parent_ns=None):
+        # Always return only the base name (after last '_' or '::')
+        if '::' in name:
+            name = name.split('::')[-1]
+        if '_' in name:
+            name = name.split('_')[-1]
+        return name
+
+    def emit_enum(enum, indent="", parent_ns=None):
+        enum_name = get_local_name(enum.name, parent_ns)
+        if enum.doc:
+            for line in (enum.doc or '').strip().splitlines():
+                lines.append(f"{indent}// {line}")
+        lines.append(f"{indent}export enum {enum_name} {{")
+        all_values = enum.get_all_values() if hasattr(enum, 'get_all_values') else enum.values
+        assigned = {}
+        last_value = None
+        for idx, value in enumerate(all_values):
+            if value.value is not None:
+                val = value.value
+            else:
+                val = last_value + 1 if last_value is not None else 0
+            assigned[value.name] = val
+            last_value = val
+        for value in all_values:
+            if value.doc:
+                for line in (value.doc or '').strip().splitlines():
+                    lines.append(f"{indent}    // {line}")
+            lines.append(f"{indent}    {value.name} = {assigned[value.name]},")
+        lines.append(f"{indent}}}\n")
+
+    def ts_type(field, parent_ns=None):
+        ftypes = field.field_types
+        trefs = field.type_refs
+        # Map field types to TypeScript types
+        if ftypes[0].name == "MAP":
+            key_ts = ts_type_helper(ftypes[1], trefs[1], parent_ns, field)
+            val_ts = ts_type_helper(ftypes[2], trefs[2], parent_ns, field)
+            return f"Record<{key_ts}, {val_ts}>"
+        if ftypes[0].name == "ARRAY":
+            elem_ts = ts_type_helper(ftypes[1], trefs[1], parent_ns, field)
+            return f"{elem_ts}[]"
+        return ts_type_helper(ftypes[0], trefs[0], parent_ns, field)
+
+    def ts_type_helper(ftype, tref, parent_ns=None, field=None):
+        # DEBUG: Print field info for enum fields
+        if ftype.name == "ENUM" and field is not None:
+            print(f"[TSGEN DEBUG] field.name={getattr(field, 'name', None)}, ftype={ftype}, type_names={getattr(field, 'type_names', None)}, tref={tref}, tref.name={getattr(tref, 'name', None) if tref else None}")
+        # Map model FieldType to TypeScript types
+        if ftype.name == "INT":
+            return "number"
+        if ftype.name == "STRING":
+            return "string"
+        if ftype.name == "BOOL":
+            return "boolean"
+        if ftype.name == "FLOAT" or ftype.name == "DOUBLE":
+            return "number"
+        if ftype.name == "ENUM":
+            # Always use the resolved enum type name if available
+            if tref is not None and hasattr(tref, 'name'):
+                return get_local_name(tref.name, parent_ns)
+            # If inline enum, generate and emit the enum type
+            if field is not None and getattr(field, 'inline_values', []):
+                parent_name = get_local_name(field.parent.name, parent_ns) if hasattr(field, 'parent') and field.parent else "Parent"
+                enum_type_name = f"{parent_name}_{get_local_name(field.name, parent_ns)}"
+                if enum_type_name not in emitted_inline_enums:
+                    emitted_inline_enums.add(enum_type_name)
+                    lines.append(f"    export enum {enum_type_name} {{")
+                    for v in field.inline_values:
+                        lines.append(f"        {v.name} = {v.value},")
+                    lines.append(f"    }}\n")
+                return enum_type_name
+            # Try to use type_names if available and not a primitive
+            if field is not None and hasattr(field, 'type_names'):
+                for tname in field.type_names:
+                    if tname and tname.lower() not in ("int", "string", "bool", "float", "double", "map", "array", "options", "compound"):
+                        # If tname looks like a QFN (e.g., 'Base::Command.type'), extract the last part
+                        if '::' in tname:
+                            last = tname.split('::')[-1]
+                            # If it has a dot (e.g., Command.type), take the part before the dot
+                            if '.' in last:
+                                last = last.split('.')[0]
+                            return get_local_name(last, parent_ns)
+                        # If it has a dot (e.g., Command.type), take the part before the dot
+                        if '.' in tname:
+                            last = tname.split('.')[0]
+                            return get_local_name(last, parent_ns)
+                        return get_local_name(tname, parent_ns)
+            # Fallback: use the field name if it matches an enum in the same namespace
+            if field is not None and hasattr(field, 'parent') and hasattr(field.parent, 'enums'):
+                for enum in getattr(field.parent, 'enums', []):
+                    if enum.name == field.name or get_local_name(enum.name, parent_ns) == field.name:
+                        return get_local_name(enum.name, parent_ns)
+            # Fallback: use 'string' if unresolved
+            return "string"
+        if ftype.name == "MESSAGE":
+            if tref is not None and hasattr(tref, 'name'):
+                return get_local_name(tref.name, parent_ns)
+            return "any"
+        if ftype.name == "COMPOUND":
+            if field is not None and hasattr(field, 'parent') and hasattr(field, 'name'):
+                return f"{get_local_name(field.parent.name, parent_ns)}_{get_local_name(field.name, parent_ns)}_Compound"
+            return "any"
+        return "any"
+
+    def emit_message(msg, indent="", parent_ns=None):
+        if msg.doc:
+            for line in (msg.doc or '').strip().splitlines():
+                lines.append(f"{indent}// {line}")
+        msg_name = get_local_name(msg.name, parent_ns)
+        lines.append(f"{indent}export interface {msg_name} {{")
+        if not msg.fields:
+            lines.append(f"{indent}    // No fields")
+        else:
+            for field in msg.fields:
+                lines.append(f"{indent}    {field.name}: {ts_type(field, parent_ns)};")
+        lines.append(f"{indent}}}\n")
+
+    def emit_namespace(ns, indent=""):
+        ns_name = ns.name
+        has_content = bool(ns.enums or ns.messages or ns.namespaces)
+        if ns_name:
+            lines.append(f"{indent}export namespace {ns_name} {{")
+            indent += "    "
+        for enum in getattr(ns, 'enums', []):
+            emit_enum(enum, indent, ns_name)
+        for msg in getattr(ns, 'messages', []):
+            emit_message(msg, indent, ns_name)
+        for nested in getattr(ns, 'namespaces', []):
+            emit_namespace(nested, indent)
+        if ns_name:
+            indent = indent[:-4]
+            lines.append(f"{indent}}}\n")
+
+    for ns in getattr(model, 'namespaces', []):
+        emit_namespace(ns)
+
+    return "\n".join(lines)
+
+def write_typescript_file(model: Model, out_path):
+    code = generate_typescript_code(model)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(code)
+
+# TESTS
+if __name__ == "__main__":
+    import os
+    from def_file_loader import load_early_model_with_imports
+    from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+
+    def test_typescript_generator():
+        test_dir = os.path.join(os.path.dirname(__file__), "..", "tests", "def")
+        for fname in os.listdir(test_dir):
+            if not fname.endswith(".def") or "invalid" in fname or "unresolved" in fname:
+                continue
+            main_path = os.path.join(test_dir, fname)
+            early_main, all_early_models = load_early_model_with_imports(main_path)
+            model_main = EarlyModelToModelTransform().transform(early_main)
+            ts_code = generate_typescript_code(model_main)
+            assert ts_code.strip(), f"No TypeScript code generated for {fname}"
+            print(f"[PASS] {fname}")
+    test_typescript_generator()

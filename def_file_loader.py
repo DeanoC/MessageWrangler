@@ -248,11 +248,37 @@ def _build_early_model_from_lark_tree(tree, current_processing_file_namespace: s
                 if type_node.children and isinstance(type_node.children[0], Token):
                     info['raw_type'] = str(type_node.children[0])
             elif type_node.data == 'enum_type':
-                info['is_inline_enum'] = True
+                # Patch: distinguish between inline enum and referenced enum
+                has_inline_values = False
                 for child in type_node.children:
                     if isinstance(child, Tree) and child.data == 'enum_value_or_comment_list':
                         info['inline_values_raw'] = _parse_value_list_raw(child, kind='enum')
+                        has_inline_values = True
                         break
+                if has_inline_values:
+                    info['is_inline_enum'] = True
+                else:
+                    # Look for referenced enum name (qualified_name_with_dot or NAME)
+                    for child in type_node.children:
+                        if isinstance(child, Tree) and child.data == 'qualified_name_with_dot':
+                            names = []
+                            for c in child.children:
+                                if isinstance(c, Token) and c.type == 'NAME':
+                                    names.append(str(c))
+                            if names:
+                                val = '::'.join(names)
+                                info['referenced_name_raw'] = val
+                                info['raw_type'] = val
+                                info['type_name'] = val
+                                break
+                        elif isinstance(child, Token) and child.type == 'NAME':
+                            val = str(child)
+                            info['referenced_name_raw'] = val
+                            info['raw_type'] = val
+                            info['type_name'] = val
+                            break
+                    # Do NOT set is_inline_enum if no inline values
+                    info['is_inline_enum'] = False
             elif type_node.data == 'options_type':
                 info['is_inline_options'] = True
                 for child in type_node.children:
