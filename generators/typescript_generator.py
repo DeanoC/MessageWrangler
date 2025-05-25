@@ -60,24 +60,31 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         if enum.doc:
             for line in (enum.doc or '').strip().splitlines():
                 lines.append(f"{indent}// {line}")
-        lines.append(f"{indent}export enum {enum_name} {{")
-        all_values = enum.get_all_values() if hasattr(enum, 'get_all_values') else enum.values
-        assigned = {}
-        last_value = None
-        for idx, value in enumerate(all_values):
-            if value.value is not None:
-                val = value.value
-            else:
-                val = last_value + 1 if last_value is not None else 0
-            assigned[value.name] = val
-            last_value = val
-        for value in all_values:
-            if value.doc:
-                for line in (value.doc or '').strip().splitlines():
-                    lines.append(f"{indent}    // {line}")
-            # Emit the full value.name (with prefix) for uniqueness
-            lines.append(f"{indent}    {value.name} = {assigned[value.name]},")
-        lines.append(f"{indent}}}\n")
+        if getattr(enum, 'is_open', False):
+            # Emit as a type alias: union of known values plus number
+            all_values = enum.get_all_values() if hasattr(enum, 'get_all_values') else enum.values
+            value_literals = [str(v.value) for v in all_values]
+            type_union = " | ".join(value_literals + ["number"])
+            lines.append(f"{indent}export type {enum_name} = {type_union};\n")
+        else:
+            lines.append(f"{indent}export enum {enum_name} {{")
+            all_values = enum.get_all_values() if hasattr(enum, 'get_all_values') else enum.values
+            assigned = {}
+            last_value = None
+            for idx, value in enumerate(all_values):
+                if value.value is not None:
+                    val = value.value
+                else:
+                    val = last_value + 1 if last_value is not None else 0
+                assigned[value.name] = val
+                last_value = val
+            for value in all_values:
+                if value.doc:
+                    for line in (value.doc or '').strip().splitlines():
+                        lines.append(f"{indent}    // {line}")
+                # Emit the full value.name (with prefix) for uniqueness
+                lines.append(f"{indent}    {value.name} = {assigned[value.name]},")
+            lines.append(f"{indent}}}\n")
 
     def ts_type(field, parent_ns=None):
         ftypes = field.field_types
@@ -95,7 +102,7 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
     def ts_type_helper(ftype, tref, parent_ns=None, field=None):
         # DEBUG: Print field info for enum fields
         if ftype.name == "ENUM" and field is not None:
-            print(f"[TSGEN DEBUG] field.name={getattr(field, 'name', None)}, ftype={ftype}, type_names={getattr(field, 'type_names', None)}, tref={tref}, tref.name={getattr(tref, 'name', None) if tref else None}")
+            print(f"[TSGEN DEBUG] field.name={getattr(field, 'name', None)}, ftype={ftype}, type_names={getattr(field, 'type_names', None)}, type_refs={getattr(field, 'type_refs', None)}, tref={tref}, tref.name={getattr(tref, 'name', None) if tref else None}, tref.qfn={getattr(tref, 'qfn', None) if tref else None}")
         # Map model FieldType to TypeScript types
         if ftype.name == "INT":
             return "number"
@@ -109,11 +116,19 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
             # Use namespace import only for external enums, otherwise use local name
             if tref is not None and hasattr(tref, 'name'):
                 ref_file = getattr(tref, 'file', None)
+                ref_ns = getattr(tref, 'namespace', None)
                 if ref_file:
                     ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
                     if ref_file_base != current_file_base:
                         ns_name = filebase_to_ns.get(ref_file_base, ref_file_base)
-                        return f"{ns_name}.{get_local_name(tref.name, parent_ns)}"
+                        # If the referenced enum is inside a namespace, qualify it fully: ns.ns.EnumName
+                        if ref_ns:
+                            return f"{ns_name}.{ref_ns}.{get_local_name(tref.name, parent_ns)}"
+                        else:
+                            return f"{ns_name}.{get_local_name(tref.name, parent_ns)}"
+                # If the referenced enum is in a nested namespace, qualify it
+                if ref_ns and ref_ns != parent_ns:
+                    return f"{ref_ns}.{get_local_name(tref.name, parent_ns)}"
                 return get_local_name(tref.name, parent_ns)
             # If inline enum, generate and emit the enum type
             if field is not None and getattr(field, 'inline_values', []):
@@ -147,8 +162,11 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
                 for enum in getattr(field.parent, 'enums', []):
                     if enum.name == field.name or get_local_name(enum.name, parent_ns) == field.name:
                         return get_local_name(enum.name, parent_ns)
-            # Fallback: use 'string' if unresolved
-            return "string"
+            # Fallback: emit error or 'never' for unresolved enum references
+            import sys
+            if field is not None:
+                print(f"[TSGEN ERROR] Unresolved enum type for field '{getattr(field, 'name', None)}' in parent '{getattr(field.parent, 'name', None) if field and hasattr(field, 'parent') else None}'. type_names={getattr(field, 'type_names', None)}", file=sys.stderr)
+            return "never /* UNRESOLVED_ENUM */"
         if ftype.name == "MESSAGE":
             if tref is not None and hasattr(tref, 'name'):
                 ref_file = getattr(tref, 'file', None)
@@ -156,16 +174,29 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
                 model_ns = None
                 if hasattr(model, 'file') and model.file:
                     model_ns = os.path.splitext(os.path.basename(model.file))[0]
-                if ref_file:
-                    ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
-                    if ref_file_base != current_file_base:
-                        ns_name = filebase_to_ns.get(ref_file_base, ref_file_base)
-                        return f"{ns_name}.{get_local_name(tref.name, parent_ns)}"
-                    # If the referenced type is in a nested namespace, qualify it
-                    if ref_ns and ref_ns != model_ns:
-                        return f"{ref_ns}.{get_local_name(tref.name, parent_ns)}"
+                # If the referenced type is in a nested namespace, qualify it
+                if ref_ns and ref_ns != parent_ns:
+                    return f"{ref_ns}.{get_local_name(tref.name, parent_ns)}"
                 return get_local_name(tref.name, parent_ns)
-            raise RuntimeError(f"Unresolved MESSAGE type for field '{getattr(field, 'name', None)}' in parent '{getattr(field.parent, 'name', None) if field and hasattr(field, 'parent') else None}'")
+            # Fallback: use type_names if available and not a primitive
+            if field is not None and hasattr(field, 'type_names'):
+                for tname in field.type_names:
+                    if tname and tname.lower() not in ("int", "string", "bool", "float", "double", "map", "array", "options", "compound"):
+                        # If tname looks like a QFN (e.g., 'Base::Command.type'), extract the last part
+                        if '::' in tname:
+                            parts = tname.split('::')
+                            if len(parts) > 1:
+                                ns_part = parts[-2]
+                                name_part = parts[-1]
+                                return f"{ns_part}.{get_local_name(name_part, parent_ns)}"
+                            else:
+                                return get_local_name(parts[-1], parent_ns)
+                        return get_local_name(tname, parent_ns)
+            # Fallback: emit error or 'never' for unresolved message references
+            import sys
+            if field is not None:
+                print(f"[TSGEN ERROR] Unresolved message type for field '{getattr(field, 'name', None)}' in parent '{getattr(field.parent, 'name', None) if field and hasattr(field, 'parent') else None}'. type_names={getattr(field, 'type_names', None)}", file=sys.stderr)
+            return "never /* UNRESOLVED_MESSAGE */"
         if ftype.name == "COMPOUND":
             if field is not None and hasattr(field, 'parent') and hasattr(field, 'name'):
                 return f"{get_local_name(field.parent.name, parent_ns)}_{get_local_name(field.name, parent_ns)}_Compound"

@@ -58,68 +58,130 @@ def generate_python3_code(model: Model, module_name: str = "messages", transform
         return get_local_name(name, parent_ns)
 
     def emit_enum_inner(enum, indent="", parent_ns=None):
-        base = "Enum"
-        parent_comment = None
-        if enum.parent is not None:
-            parent_name = getattr(enum.parent, 'name', enum.parent.name)
-            parent_mod = getattr(enum.parent, 'namespace', None)
-            fq_flat_name = parent_name
-            import sys
-            print(f"[PYGEN DEBUG] emit_enum: {enum.name} parent={fq_flat_name}", file=sys.stderr)
-            parent_file_ns = None
-            if hasattr(enum.parent, 'file') and enum.parent.file:
-                import os
-                parent_file_ns = os.path.splitext(os.path.basename(enum.parent.file))[0]
-            parent_flat_name = getattr(enum.parent, 'name', parent_name)
-            # Emit the flat name with underscore for the inheritance comment to match test expectation
-            if parent_file_ns:
-                parent_full_flat = f"{parent_file_ns}_{parent_flat_name}"
+        open_enum_assignments = []
+        if getattr(enum, 'is_open', False):
+            # Emit a class that allows any value, but provides known values as class attributes
+            enum_name = get_local_name(enum.name, parent_ns)
+            if enum.doc:
+                for line in (enum.doc or '').strip().splitlines():
+                    lines.append(f"{indent}# {line}")
+            lines.append(f"{indent}class {enum_name}:")
+            # Known values as class attributes
+            if hasattr(enum, 'get_all_values'):
+                all_values = enum.get_all_values()
             else:
-                parent_full_flat = parent_flat_name
-            parent_comment = f"# NOTE: Intended to inherit from {parent_full_flat} (from {parent_mod}), but Python Enum does not support Enum subclassing."
-        if enum.doc:
-            for line in (enum.doc or '').strip().splitlines():
-                lines.append(f"{indent}# {line}")
-        if parent_comment:
-            lines.append(f"{indent}{parent_comment}")
-        # Always use local name for class emission (strip file-level prefix)
-        enum_name = get_local_name(enum.name, parent_ns)
-        lines.append(f"{indent}class {enum_name}({base}):")
-        enum_body_lines = []
-        if hasattr(enum, 'get_all_values'):
-            all_values = enum.get_all_values()
-        else:
-            all_values = enum.values
-        child_explicit = {v.name: v.value for v in enum.values if v.value is not None}
-        assigned = {}
-        last_value = None
-        for idx, value in enumerate(all_values):
-            if value.name in child_explicit:
-                val = child_explicit[value.name]
-            elif value.value is not None:
-                val = value.value
-            else:
-                if last_value is not None:
-                    val = last_value + 1
+                all_values = enum.values
+            child_explicit = {v.name: v.value for v in enum.values if v.value is not None}
+            assigned = {}
+            last_value = None
+            for idx, value in enumerate(all_values):
+                if value.name in child_explicit:
+                    val = child_explicit[value.name]
+                elif value.value is not None:
+                    val = value.value
                 else:
-                    val = 0
-            assigned[value.name] = val
-            last_value = val
-        emitted = set()
-        for value in all_values:
-            if value.name in emitted:
-                continue
-            emitted.add(value.name)
-            if value.doc:
-                for line in (value.doc or '').strip().splitlines():
-                    enum_body_lines.append(f"{indent}    # {line}")
-            enum_body_lines.append(f"{indent}    {value.name} = {assigned[value.name]}")
-        if enum_body_lines:
-            lines.extend(enum_body_lines)
+                    if last_value is not None:
+                        val = last_value + 1
+                    else:
+                        val = 0
+                assigned[value.name] = val
+                last_value = val
+            emitted = set()
+            class_body_lines = []
+            body_emitted = False
+            for value in all_values:
+                if value.name in emitted:
+                    continue
+                emitted.add(value.name)
+                if value.doc:
+                    for line in (value.doc or '').strip().splitlines():
+                        class_body_lines.append(f"# {line}")
+                        body_emitted = True
+            # Always emit the methods for open enums
+            class_body_lines.append(f"def __init__(self, value):")
+            class_body_lines.append(f"    self.value = value")
+            class_body_lines.append(f"def __eq__(self, other):")
+            class_body_lines.append(f"    if isinstance(other, {enum_name}):")
+            class_body_lines.append(f"        return self.value == other.value")
+            class_body_lines.append(f"    return self.value == other")
+            class_body_lines.append(f"def __repr__(self):")
+            class_body_lines.append(f"    return f'{enum_name}({{self.value!r}})'")
+            if not body_emitted:
+                class_body_lines.append(f"pass")
+            # Indent all class body lines by one level (4 spaces)
+            lines.extend([f"{indent}    {l}" if l.strip() else f"{indent}" for l in class_body_lines])
+            # After class definition, assign known values as class attributes (module level)
+            # Determine the fully qualified class name for assignments
+            fq_class_name = enum_name
+            if parent_ns:
+                fq_class_name = f"{parent_ns}.{enum_name}"
+            for value in all_values:
+                open_enum_assignments.append((fq_class_name, value.name, assigned[value.name]))
+            lines.append("")
+            return enum_name, open_enum_assignments
         else:
-            lines.append(f"{indent}    pass")
-        lines.append("")
-        return enum_name
+            base = "Enum"
+            parent_comment = None
+            if enum.parent is not None:
+                parent_name = getattr(enum.parent, 'name', enum.parent.name)
+                parent_mod = getattr(enum.parent, 'namespace', None)
+                fq_flat_name = parent_name
+                import sys
+                print(f"[PYGEN DEBUG] emit_enum: {enum.name} parent={fq_flat_name}", file=sys.stderr)
+                parent_file_ns = None
+                if hasattr(enum.parent, 'file') and enum.parent.file:
+                    import os
+                    parent_file_ns = os.path.splitext(os.path.basename(enum.parent.file))[0]
+                parent_flat_name = getattr(enum.parent, 'name', parent_name)
+                # Emit the flat name with underscore for the inheritance comment to match test expectation
+                if parent_file_ns:
+                    parent_full_flat = f"{parent_file_ns}_{parent_flat_name}"
+                else:
+                    parent_full_flat = parent_flat_name
+                parent_comment = f"# NOTE: Intended to inherit from {parent_full_flat} (from {parent_mod}), but Python Enum does not support Enum subclassing."
+            if enum.doc:
+                for line in (enum.doc or '').strip().splitlines():
+                    lines.append(f"{indent}# {line}")
+            if parent_comment:
+                lines.append(f"{indent}{parent_comment}")
+            # Always use local name for class emission (strip file-level prefix)
+            enum_name = get_local_name(enum.name, parent_ns)
+            lines.append(f"{indent}class {enum_name}({base}):")
+            enum_body_lines = []
+            if hasattr(enum, 'get_all_values'):
+                all_values = enum.get_all_values()
+            else:
+                all_values = enum.values
+            child_explicit = {v.name: v.value for v in enum.values if v.value is not None}
+            assigned = {}
+            last_value = None
+            for idx, value in enumerate(all_values):
+                if value.name in child_explicit:
+                    val = child_explicit[value.name]
+                elif value.value is not None:
+                    val = value.value
+                else:
+                    if last_value is not None:
+                        val = last_value + 1
+                    else:
+                        val = 0
+                assigned[value.name] = val
+                last_value = val
+            emitted = set()
+            for value in all_values:
+                if value.name in emitted:
+                    continue
+                emitted.add(value.name)
+                if value.doc:
+                    for line in (value.doc or '').strip().splitlines():
+                        enum_body_lines.append(f"{indent}    # {line}")
+                enum_body_lines.append(f"{indent}    {value.name} = {assigned[value.name]}")
+            if enum_body_lines:
+                lines.extend(enum_body_lines)
+            else:
+                lines.append(f"{indent}    pass")
+            lines.append("")
+            return enum_name, []
 
     def emit_message(msg, indent="", parent_ns=None):
         if msg.doc:
@@ -263,8 +325,9 @@ def generate_python3_code(model: Model, module_name: str = "messages", transform
                 if tref is not None and hasattr(tref, 'name'):
                     referenced_types.add(tref.name)
         # Emit enums as nested classes and assign as class attributes (inside class body)
+        open_enum_assignments = []
         for enum in getattr(ns, 'enums', []):
-            enum_name = emit_enum_inner(enum, subindent, ns.name)
+            enum_name, enum_assignments = emit_enum_inner(enum, subindent, ns.name)
             if enum_name:
                 enum_names.append(enum_name)
                 local_name = get_local_name(enum.name, ns.name)
@@ -277,6 +340,8 @@ def generate_python3_code(model: Model, module_name: str = "messages", transform
                     # Also emit the fully-prefixed name as an alias (for test compatibility)
                     if enum.name != local_name:
                         file_level_full_aliases[enum.name] = enum_name
+            if enum_assignments:
+                open_enum_assignments.extend(enum_assignments)
         # Emit messages as nested classes and assign as class attributes (inside class body)
         for msg in getattr(ns, 'messages', []):
             emit_message(msg, subindent, ns.name)
@@ -298,6 +363,10 @@ def generate_python3_code(model: Model, module_name: str = "messages", transform
                 lines.append(f"{subindent}{enum_name} = {enum_name}")
             for msg_name in msg_names:
                 lines.append(f"{subindent}{msg_name} = {msg_name}")
+        # Emit open enum assignments at the module level after the namespace class
+        if not class_path and ns.name and open_enum_assignments:
+            for fq_class_name, value_name, value_val in open_enum_assignments:
+                lines.append(f"{fq_class_name}.{value_name} = {fq_class_name}({value_val})")
         # Only emit file-level aliases at the module level for direct import (after the class definition)
         if not class_path and ns.name:
             def build_full_class_path(class_name):

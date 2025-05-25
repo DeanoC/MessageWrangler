@@ -1,3 +1,32 @@
+def test_typescript_open_enum_allows_arbitrary_values(tmp_path):
+    """
+    Test that open enums (open_enum in DSL) allow arbitrary values, not just the defined ones, in TypeScript output.
+    """
+    import shutil
+    def_path = os.path.join("tests", "def", "test_standalone_enum.def")
+    early_model, _ = load_early_model_with_imports(def_path)
+    model = EarlyModelToModel().process(early_model)
+    ts_code = generate_typescript_code(model)
+    # Write the generated TypeScript code to a temp directory
+    output_dir = tmp_path / "typescript"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "test_standalone_enum.ts"
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(ts_code)
+    # Check that TestOpenEnum is present and allows arbitrary values
+    # We expect open enums to be emitted as a union of known values plus string/number (or similar)
+    with open(output_path, "r", encoding="utf-8") as f:
+        ts_out = f.read()
+    # Find the TestOpenEnum definition
+    found = False
+    for line in ts_out.splitlines():
+        if "TestOpenEnum" in line:
+            found = True
+            # Should not be a strict enum only; should allow arbitrary values
+            # Acceptable: type TestOpenEnum = ... | number; or similar
+            assert ("| number" in line or "| string" in line or ": number" in line or ": string" in line or "any" in line), \
+                f"TestOpenEnum should allow arbitrary values, got: {line}"
+    assert found, "TestOpenEnum not found in generated TypeScript output."
 def test_typescript_generator_nested_namespace_qualification():
     """
     Ensure that fields referencing nested namespace types (e.g., TestNS.Nested) are correctly qualified in the generated TypeScript.
@@ -178,6 +207,29 @@ def test_typescript_generator_generates_code(def_path):
         def_imports = parse_def_imports(def_path)
         ts_imports = parse_ts_imports(ts_out)
         assert def_imports == ts_imports, f"Mismatch between .def imports {def_imports} and TypeScript imports {ts_imports} in {output_path}"
+
+    # --- Custom test: Ensure no enum field is typed as string in the generated TypeScript ---
+    # This test is specific for test_enum_references.def and similar files
+    if os.path.basename(def_path) == "test_enum_references.def":
+        # Map message name to expected enum fields
+        expected_enum_fields = {
+            "EnumUser": ["containerStatus"],
+            "NamespacedEnumUser": ["testLevel"],
+            "MultipleEnumUser": ["multiType", "multiState"],
+            "ExtendedEnumUser": ["extendedStatus"],
+            "ExtendedNamespacedEnumUser": ["extendedLevel"],
+            "ExtendedMultipleEnumUser": ["extendedType", "extendedState"],
+        }
+        for msg_name, field_names in expected_enum_fields.items():
+            interface_header = f"export interface {msg_name} {{"
+            if interface_header in ts_out:
+                start = ts_out.index(interface_header)
+                end = ts_out.index('}', start)
+                interface_block = ts_out[start:end]
+                for field in field_names:
+                    for line in interface_block.splitlines():
+                        if f"{field}:" in line:
+                            assert ": string" not in line, f"Field '{field}' in '{msg_name}' should not be 'string' (should be an enum) in {output_path}. Got: {line}"
  
     # 6. Validate that 'any' is never used as a type in the generated TypeScript code
     # This ensures all types are known and written into the generated file (closed system)

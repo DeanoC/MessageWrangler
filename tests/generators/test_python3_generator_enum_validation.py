@@ -54,3 +54,33 @@ def test_enum_generation_and_validation():
     assert ns2.NamespacedEnum.Zero.value == 0
     assert ns2.NamespacedEnum.One.value == 1
     assert ns2.NamespacedEnum.Two.value == 2
+
+
+def test_open_enum_accepts_arbitrary_values():
+    """
+    Test that open enums (open_enum in DSL) allow arbitrary values, not just the defined ones.
+    """
+    def_path = os.path.join("tests", "def", "test_standalone_enum.def")
+    early_model, _ = load_early_model_with_imports(def_path)
+    model = EarlyModelToModel().process(early_model)
+    out_dir = os.path.join("generated", "python3")
+    write_python3_files_for_model_and_imports(model, out_dir)
+    ns_name = get_file_level_namespace_name(model)
+    py_path = os.path.join(out_dir, f"{ns_name}.py")
+    assert os.path.exists(py_path)
+    mod = import_generated_module(py_path, ns_name)
+    ns = getattr(mod, "test_standalone_enum")
+    assert hasattr(ns, "TestOpenEnum")
+    open_enum_nested = getattr(ns, "TestOpenEnum")
+    # Known values
+    assert open_enum_nested.Zero.value == 0
+    assert open_enum_nested.One.value == 1
+    assert open_enum_nested.Two.value == 2
+    # Should allow arbitrary values (simulate open enum)
+    # Try to construct an enum with a value not defined
+    try:
+        val = open_enum_nested(12345)
+        # If this is a strict Enum, this will raise ValueError. For open_enum, it should succeed.
+        assert getattr(val, 'value', None) == 12345 or val == 12345
+    except ValueError:
+        pytest.fail("open_enum should allow arbitrary values, but ValueError was raised.")
