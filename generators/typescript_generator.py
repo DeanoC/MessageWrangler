@@ -10,51 +10,84 @@ from model_transforms.assign_unique_names_transform import AssignUniqueNamesTran
 from model_transforms.flatten_enums_transform import FlattenEnumsTransform
 
 def generate_typescript_code(model: Model, module_name: str = "messages", transforms: List[Callable] = None):
+    import sys
     # Apply enum value prefixing transform for TypeScript to avoid enum value name collisions
     from model_transforms.prefix_enum_value_names_transform import PrefixEnumValueNamesTransform
     model = PrefixEnumValueNamesTransform().transform(model)
     # Track emitted inline enums to avoid duplicates
     emitted_inline_enums = set()
 
-    # Apply enum value assignment and enum flattening so all enums/messages have a flat, unique name and values are set
+    # Apply unique name assignment, enum value assignment, and enum flattening
     from model_transforms.assign_enum_values_transform import AssignEnumValuesTransform
+    model = AssignUniqueNamesTransform().transform(model)
     model = AssignEnumValuesTransform().transform(model)
     model = FlattenEnumsTransform().transform(model)
 
     lines = []
 
     # --- Collect external type references for imports ---
-    import_map = {}  # file_base -> set(type_names)
+    import_map = {}  # file_base -> namespace_name
     current_file_base = None
     if hasattr(model, 'file') and model.file:
         import os
         current_file_base = os.path.splitext(os.path.basename(model.file))[0]
 
+    # Map file_base to namespace name (assume top-level namespace name matches file_base)
+    filebase_to_ns = {}
+    for ns in getattr(model, 'imports', {}).values():
+        if hasattr(ns, 'file') and hasattr(ns, 'namespaces'):
+            ns_file_base = os.path.splitext(os.path.basename(ns.file))[0]
+            if ns.namespaces:
+                filebase_to_ns[ns_file_base] = ns.namespaces[0].name
+
     def collect_imports_from_field(field):
         for ftype, tref in zip(field.field_types, field.type_refs):
             if ftype.name in ("ENUM", "MESSAGE") and tref is not None:
-                # tref may have .file or .namespace
                 ref_file = getattr(tref, 'file', None)
-                ref_name = getattr(tref, 'name', None)
-                if ref_file and ref_name:
+                if ref_file:
                     ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
                     if ref_file_base != current_file_base:
-                        import_map.setdefault(ref_file_base, set()).add(ref_name)
+                        # Use namespace import
+                        import_map[ref_file_base] = filebase_to_ns.get(ref_file_base, ref_file_base)
+
+    def collect_imports_from_parent(parent_ref):
+        if parent_ref is not None:
+            ref_file = getattr(parent_ref, 'file', None)
+            if ref_file:
+                ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
+                if ref_file_base != current_file_base:
+                    import_map[ref_file_base] = filebase_to_ns.get(ref_file_base, ref_file_base)
 
     def collect_imports_from_ns(ns):
         for msg in getattr(ns, 'messages', []):
+            # Collect imports for parent message reference
+            collect_imports_from_parent(getattr(msg, 'parent', None))
             for field in getattr(msg, 'fields', []):
                 collect_imports_from_field(field)
+        for enum in getattr(ns, 'enums', []):
+            # Collect imports for parent enum reference (enum inheritance)
+            collect_imports_from_parent(getattr(enum, 'parent', None))
         for nested in getattr(ns, 'namespaces', []):
             collect_imports_from_ns(nested)
 
     for ns in getattr(model, 'namespaces', []):
         collect_imports_from_ns(ns)
 
-    # --- Emit import statements ---
-    for import_file, type_names in sorted(import_map.items()):
-        type_list = ', '.join(sorted(type_names))
-        lines.append(f"import {{ {type_list} }} from './{import_file}';")
+    # DEBUG: Print import_map and parent references
+    print(f"[TSGEN DEBUG] import_map: {import_map}", file=sys.stderr)
+    for ns in getattr(model, 'namespaces', []):
+        for msg in getattr(ns, 'messages', []):
+            if getattr(msg, 'parent', None) is not None:
+                parent = getattr(msg, 'parent')
+                print(f"[TSGEN DEBUG] Message {msg.name} parent: file={getattr(parent, 'file', None)}, name={getattr(parent, 'name', None)}", file=sys.stderr)
+        for enum in getattr(ns, 'enums', []):
+            if getattr(enum, 'parent', None) is not None:
+                parent = getattr(enum, 'parent')
+                print(f"[TSGEN DEBUG] Enum {enum.name} parent: file={getattr(parent, 'file', None)}, name={getattr(parent, 'name', None)}", file=sys.stderr)
+
+    # --- Emit namespace import statements ---
+    for import_file, ns_name in sorted(import_map.items()):
+        lines.append(f"import * as {ns_name} from './{import_file}';")
     if import_map:
         lines.append("")
 
@@ -86,6 +119,7 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
             if value.doc:
                 for line in (value.doc or '').strip().splitlines():
                     lines.append(f"{indent}    // {line}")
+            # Emit the full value.name (with prefix) for uniqueness
             lines.append(f"{indent}    {value.name} = {assigned[value.name]},")
         lines.append(f"{indent}}}\n")
 
@@ -116,8 +150,14 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         if ftype.name == "FLOAT" or ftype.name == "DOUBLE":
             return "number"
         if ftype.name == "ENUM":
-            # Always use the resolved enum type name if available
+            # Use namespace import only for external enums, otherwise use local name
             if tref is not None and hasattr(tref, 'name'):
+                ref_file = getattr(tref, 'file', None)
+                if ref_file:
+                    ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
+                    if ref_file_base != current_file_base:
+                        ns_name = filebase_to_ns.get(ref_file_base, ref_file_base)
+                        return f"{ns_name}.{get_local_name(tref.name, parent_ns)}"
                 return get_local_name(tref.name, parent_ns)
             # If inline enum, generate and emit the enum type
             if field is not None and getattr(field, 'inline_values', []):
@@ -155,6 +195,12 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
             return "string"
         if ftype.name == "MESSAGE":
             if tref is not None and hasattr(tref, 'name'):
+                ref_file = getattr(tref, 'file', None)
+                if ref_file:
+                    ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
+                    if ref_file_base != current_file_base:
+                        ns_name = filebase_to_ns.get(ref_file_base, ref_file_base)
+                        return f"{ns_name}.{get_local_name(tref.name, parent_ns)}"
                 return get_local_name(tref.name, parent_ns)
             return "any"
         if ftype.name == "COMPOUND":
@@ -182,8 +228,13 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         if ns_name:
             lines.append(f"{indent}export namespace {ns_name} {{")
             indent += "    "
+        emitted_enum_names = set()
         for enum in getattr(ns, 'enums', []):
+            enum_local_name = get_local_name(enum.name, ns_name)
+            if enum_local_name in emitted_enum_names:
+                continue  # Skip duplicate
             emit_enum(enum, indent, ns_name)
+            emitted_enum_names.add(enum_local_name)
         for msg in getattr(ns, 'messages', []):
             emit_message(msg, indent, ns_name)
         for nested in getattr(ns, 'namespaces', []):
