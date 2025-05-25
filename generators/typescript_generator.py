@@ -4,13 +4,21 @@ Outputs TypeScript interfaces and enums for all messages and enums in the Model.
 """
 from model import Model
 from typing import List, Callable
-
+import sys
 from model_transforms.flatten_imports_transform import FlattenImportsTransform
 from model_transforms.assign_unique_names_transform import AssignUniqueNamesTransform
 from model_transforms.flatten_enums_transform import FlattenEnumsTransform
 
 def generate_typescript_code(model: Model, module_name: str = "messages", transforms: List[Callable] = None):
-    import sys
+    # --- Model transform: assign dummy enums for missing options types ---
+    from model_transforms.assign_dummy_option_enums_transform import AssignDummyOptionEnumsTransform
+    model = AssignDummyOptionEnumsTransform().transform(model)
+    # --- Ensure all namespaces have correct parent pointers ---
+    def set_namespace_parents(namespaces, parent=None):
+        for ns in namespaces:
+            setattr(ns, 'parent', parent)
+            set_namespace_parents(getattr(ns, 'namespaces', []), ns)
+    set_namespace_parents(getattr(model, 'namespaces', []))
     # Apply enum value prefixing transform for TypeScript to avoid enum value name collisions
     from model_transforms.prefix_enum_value_names_transform import PrefixEnumValueNamesTransform
     model = PrefixEnumValueNamesTransform().transform(model)
@@ -108,6 +116,8 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
                 lines.append(f"{indent}    {value.name} = {assigned[value.name]},")
             lines.append(f"{indent}}}\n")
 
+    # Track dummy enums needed per namespace
+    pending_dummy_enums = {}
     def ts_type(field, parent_ns=None):
         ftypes = field.field_types
         trefs = field.type_refs
@@ -121,42 +131,60 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
             return f"{elem_ts}[]"
         # Handle options type
         if ftypes[0].name == "OPTIONS":
-            # Prefer type_refs if available and is a ModelEnum or ModelReference
             tref = trefs[0] if trefs and len(trefs) > 0 else None
             type_name = None
             if tref is not None:
-                # If it's a ModelReference, use its name
                 if hasattr(tref, 'name') and tref.name:
                     type_name = get_local_name(tref.name, parent_ns, keep_full_for_options=True)
-                # If it's a ModelEnum, use its name
                 elif hasattr(tref, 'qfn') and tref.qfn:
                     type_name = get_local_name(tref.qfn.split('::')[-1], parent_ns, keep_full_for_options=True)
-            # Try to find the options type name in type_names
             if not type_name and hasattr(field, 'type_names') and field.type_names:
                 for tname in field.type_names:
                     if tname and tname.lower() not in ("int", "string", "bool", "float", "double", "map", "array", "options", "compound"):
                         type_name = get_local_name(tname, parent_ns, keep_full_for_options=True)
                         break
-            # If we have a type_name, check if it is defined in the output; if not, emit a fallback
             if type_name:
-                # Check if this type will be emitted as an enum/type in the output
                 all_emitted_types = set(emitted_inline_enums)
                 for ns in getattr(model, 'namespaces', []):
                     for enum in getattr(ns, 'enums', []):
                         all_emitted_types.add(get_local_name(enum.name, ns.name, keep_full_for_options=True))
-                # For options, always use a promoted CamelCase name for the fallback type
                 fallback_type_name = get_local_name(type_name, parent_ns, keep_full_for_options=True)
+                # Find the correct namespace key for this field
+                # If the field is in a message, use the message's parent namespace (object), else use parent_ns
+                ns_key = None
+                # Always walk up the namespace chain from the field's parent.namespace, including the root
+                ns_obj = None
+                if hasattr(field, 'parent') and hasattr(field.parent, 'namespace') and field.parent.namespace:
+                    ns_obj = field.parent.namespace
+                elif parent_ns:
+                    # Try to find the namespace object by name if only parent_ns is given
+                    # Look up the root namespace in the model
+                    ns_obj = None
+                    for ns_candidate in getattr(model, 'namespaces', []):
+                        if getattr(ns_candidate, 'name', None) == parent_ns:
+                            ns_obj = ns_candidate
+                            break
+                ns_names = []
+                while ns_obj is not None:
+                    ns_names.append(getattr(ns_obj, 'name', str(ns_obj)))
+                    ns_obj = getattr(ns_obj, 'parent', None)
+                ns_names = [n for n in reversed(ns_names) if n]
+                ns_key = '.'.join(ns_names) if ns_names else (parent_ns or "__root__")
+                # Ensure ns_key is always rooted at the model's root namespace
+                if hasattr(model, 'namespaces') and model.namespaces:
+                    root_ns = getattr(model.namespaces[0], 'name', None)
+                    if root_ns and ns_key and not ns_key.startswith(root_ns):
+                        ns_key = f"{root_ns}.{ns_key}" if ns_key else root_ns
+                # DEBUG: Print the ns_key and fallback_type_name for dummy enum collection
+                # print(f"[DUMMY ENUM COLLECT] ns_key={ns_key} type={fallback_type_name}")
                 if fallback_type_name not in all_emitted_types:
-                    lines.append(f"export enum {fallback_type_name} {{ /* AUTO-GENERATED DUMMY */ }}\n")
+                    pending_dummy_enums.setdefault(ns_key, set()).add(fallback_type_name)
                 return fallback_type_name
-            # Fallback: use 'number'
             return "number"
         return ts_type_helper(ftypes[0], trefs[0], parent_ns, field)
 
     def ts_type_helper(ftype, tref, parent_ns=None, field=None):
         # DEBUG: Print field info for enum fields
-        if ftype.name == "ENUM" and field is not None:
-            print(f"[TSGEN DEBUG] field.name={getattr(field, 'name', None)}, ftype={ftype}, type_names={getattr(field, 'type_names', None)}, type_refs={getattr(field, 'type_refs', None)}, tref={tref}, tref.name={getattr(tref, 'name', None) if tref else None}, tref.qfn={getattr(tref, 'qfn', None) if tref else None}")
         # Map model FieldType to TypeScript types
         if ftype.name == "INT":
             return "number"
@@ -217,7 +245,6 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
                     if enum.name == field.name or get_local_name(enum.name, parent_ns) == field.name:
                         return get_local_name(enum.name, parent_ns)
             # Fallback: emit error or 'never' for unresolved enum references
-            import sys
             if field is not None:
                 print(f"[TSGEN ERROR] Unresolved enum type for field '{getattr(field, 'name', None)}' in parent '{getattr(field.parent, 'name', None) if field and hasattr(field, 'parent') else None}'. type_names={getattr(field, 'type_names', None)}", file=sys.stderr)
             return "never /* UNRESOLVED_ENUM */"
@@ -247,7 +274,6 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
                                 return get_local_name(parts[-1], parent_ns)
                         return get_local_name(tname, parent_ns)
             # Fallback: emit error or 'never' for unresolved message references
-            import sys
             if field is not None:
                 print(f"[TSGEN ERROR] Unresolved message type for field '{getattr(field, 'name', None)}' in parent '{getattr(field.parent, 'name', None) if field and hasattr(field, 'parent') else None}'. type_names={getattr(field, 'type_names', None)}", file=sys.stderr)
             return "never /* UNRESOLVED_MESSAGE */"
@@ -267,10 +293,25 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
             lines.append(f"{indent}    // No fields")
         else:
             for field in msg.fields:
-                lines.append(f"{indent}    {field.name}: {ts_type(field, parent_ns)};")
+                # If the field type emits a dummy enum/type, ensure it is emitted at the correct indent
+                ts_type_str = ts_type(field, parent_ns)
+                # If the last line is a dummy enum, fix its indent
+                if lines and lines[-1].startswith("export enum ") and lines[-1].endswith("{ /* AUTO-GENERATED DUMMY */ }\n"):
+                    # Move the dummy enum before the field declaration, and fix indent
+                    dummy_enum = lines.pop()
+                    lines.append(f"{indent}    {dummy_enum.strip()}")
+                lines.append(f"{indent}    {field.name}: {ts_type_str};")
         lines.append(f"{indent}}}\n")
 
     def emit_namespace(ns, indent=""):
+        # Build the full namespace path for this ns
+        ns_obj = ns
+        ns_names = []
+        while ns_obj is not None:
+            ns_names.append(getattr(ns_obj, 'name', str(ns_obj)))
+            ns_obj = getattr(ns_obj, 'parent', None)
+        ns_names = [n for n in reversed(ns_names) if n]
+        ns_key = '.'.join(ns_names) if ns_names else (getattr(ns, 'name', None) or "__root__")
         ns_name = ns.name
         has_content = bool(ns.enums or ns.messages or ns.namespaces or getattr(ns, 'options', []))
         if ns_name:
@@ -280,7 +321,6 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         # Emit options as enums with bit values
         for opts in getattr(ns, 'options', []):
             if opts.get('values_raw'):
-                # Synthesize a pseudo-enum object for options
                 class OptEnum:
                     def __init__(self, name, values, doc=None):
                         self.name = name
@@ -299,10 +339,26 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
                     if val is None:
                         val = 1 << idx
                     values.append(OptValue(v['name'], val, v.get('doc')))
-                # Use the promoted name for the enum (e.g., ModesAvailableReply_available)
                 promoted_name = opts.get('promoted_name') or opts.get('name')
                 opt_enum = OptEnum(promoted_name, values, opts.get('doc'))
                 emit_enum(opt_enum, indent, ns_name, is_options=True)
+        # Emit any pending dummy enums for this namespace
+        # Build the full namespace path for this ns
+        ns_obj = ns
+        ns_names = []
+        while ns_obj is not None:
+            ns_names.append(getattr(ns_obj, 'name', str(ns_obj)))
+            ns_obj = getattr(ns_obj, 'parent', None)
+        ns_names = [n for n in reversed(ns_names) if n]  # filter out empty names
+        ns_key = '.'.join(ns_names) if ns_names else (ns_name or "__root__")
+        # DEBUG: Print the ns_key for dummy enum emission
+        # print(f"[DUMMY ENUM EMIT] ns_key={ns_key} pending={pending_dummy_enums.get(ns_key, set())}")
+        # Emit dummy enums for ModelTransform-inserted dummy enums (no values)
+        for enum in getattr(ns, 'enums', []):
+            if getattr(enum, 'is_dummy', False):
+                lines.append(f"{indent}export enum {get_local_name(enum.name, ns_name)} {{ /* AUTO-GENERATED DUMMY */ }}\n")
+        for dummy_enum in pending_dummy_enums.get(ns_key, set()):
+            lines.append(f"{indent}export enum {dummy_enum} {{ /* AUTO-GENERATED DUMMY */ }}\n")
         for enum in getattr(ns, 'enums', []):
             enum_local_name = get_local_name(enum.name, ns_name)
             if enum_local_name in emitted_enum_names:
