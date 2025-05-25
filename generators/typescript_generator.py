@@ -31,6 +31,8 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
     model = AssignEnumValuesTransform().transform(model)
     model = FlattenEnumsTransform().transform(model)
 
+    # (Removed) Assign bitflag values to all enums used as options: now handled in early model transforms and model conversion.
+
     lines = []
 
     # --- Collect external type references for imports using shared utility ---
@@ -81,12 +83,9 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         all_values = enum.get_all_values() if hasattr(enum, 'get_all_values') else enum.values
         assigned = {}
         if is_options:
-            # Assign bit values: 1, 2, 4, 8, ...
+            # Always assign bitflag values: 1, 2, 4, 8, ...
             for idx, value in enumerate(all_values):
-                if value.value is not None:
-                    val = value.value
-                else:
-                    val = 1 << idx
+                val = 1 << idx
                 assigned[value.name] = val
             lines.append(f"{indent}export enum {enum_name} {{")
             for value in all_values:
@@ -304,6 +303,10 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         lines.append(f"{indent}}}\n")
 
     def emit_namespace(ns, indent=""):
+        ns_name_dbg = getattr(ns, 'name', None)
+        print(f"[TSGEN DEBUG] Namespace: {ns_name_dbg}")
+        for e in getattr(ns, 'enums', []):
+            print(f"[TSGEN DEBUG]   Enum: {e.name} (CamelCase: {get_local_name(e.name, ns_name_dbg, keep_full_for_options=True)}) Values: {[v.name for v in getattr(e, 'values', [])]}")
         # Build the full namespace path for this ns
         ns_obj = ns
         ns_names = []
@@ -353,10 +356,24 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         ns_key = '.'.join(ns_names) if ns_names else (ns_name or "__root__")
         # DEBUG: Print the ns_key for dummy enum emission
         # print(f"[DUMMY ENUM EMIT] ns_key={ns_key} pending={pending_dummy_enums.get(ns_key, set())}")
-        # Emit dummy enums for ModelTransform-inserted dummy enums (no values)
+        # Emit enums, including real enums for inline options (bitflags)
+        emitted_enum_names = set()
         for enum in getattr(ns, 'enums', []):
+            enum_local_name = get_local_name(enum.name, ns_name)
+            if enum_local_name in emitted_enum_names:
+                continue
+            # Use is_options flag to determine if this should be emitted as a bitflag enum
             if getattr(enum, 'is_dummy', False):
-                lines.append(f"{indent}export enum {get_local_name(enum.name, ns_name)} {{ /* AUTO-GENERATED DUMMY */ }}\n")
+                if getattr(enum, 'is_options', False):
+                    emit_enum(enum, indent, ns_name, is_options=True)
+                else:
+                    lines.append(f"{indent}export enum {enum_local_name} {{ /* AUTO-GENERATED DUMMY */ }}\n")
+            else:
+                if getattr(enum, 'is_options', False):
+                    emit_enum(enum, indent, ns_name, is_options=True)
+                else:
+                    emit_enum(enum, indent, ns_name)
+            emitted_enum_names.add(enum_local_name)
         for dummy_enum in pending_dummy_enums.get(ns_key, set()):
             lines.append(f"{indent}export enum {dummy_enum} {{ /* AUTO-GENERATED DUMMY */ }}\n")
         for enum in getattr(ns, 'enums', []):

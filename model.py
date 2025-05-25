@@ -94,7 +94,7 @@ class ModelEnumValue:
         self.namespace = namespace
 
 class ModelEnum:
-    def __init__(self, name: str, values: List['ModelEnumValue'], is_open: bool = False, parent: Optional['ModelEnum'] = None, doc: Optional[str] = None, comment: Optional[str] = None, parent_raw: Optional[str] = None, file: Optional[str] = None, line: Optional[int] = None, namespace: Optional[str] = None):
+    def __init__(self, name: str, values: List['ModelEnumValue'], is_open: bool = False, parent: Optional['ModelEnum'] = None, doc: Optional[str] = None, comment: Optional[str] = None, parent_raw: Optional[str] = None, file: Optional[str] = None, line: Optional[int] = None, namespace: Optional[str] = None, is_options: bool = False):
         self.name = name
         self.values = values
         self.is_open = is_open
@@ -105,6 +105,7 @@ class ModelEnum:
         self.file = file
         self.line = line
         self.namespace = namespace
+        self.is_options = is_options
 
 class ModelMessage:
     def __init__(self, name: str, fields: List['ModelField'], parent: Optional['ModelReference'] = None, doc: Optional[str] = None, comment: Optional[str] = None, parent_raw: Optional[str] = None, file: Optional[str] = None, line: Optional[int] = None, namespace: Optional[str] = None):

@@ -53,13 +53,17 @@ class AssignEnumValuesTransform:
             print(f"    name={v.name!r}, value={v.value!r}")
 
         # Assign values in order, auto-incrementing and resetting after explicit assignments
-        last_value = 0
+        # If any value is set, preserve it, but assign missing values by incrementing from the last explicit value
+        last_value = None
         for idx, v in enumerate(merged):
             if v.value is not None:
                 last_value = v.value
             else:
+                if last_value is None:
+                    last_value = 0
+                else:
+                    last_value += 1
                 v.value = last_value
-            last_value += 1
 
         # Debug: print merged list after value assignment
         print(f"[DEBUG] Enum '{enum.name}' merged values after assignment:")

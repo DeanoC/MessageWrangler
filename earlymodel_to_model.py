@@ -236,6 +236,8 @@ class EarlyModelToModel:
                     namespace=getattr(v, 'namespace', None)
                 ) for v in getattr(enum, 'values', [])
             ]
+            # Propagate is_options_raw (for promoted options) to ModelEnum
+            is_options = getattr(enum, 'is_options_raw', False)
             model_enum = ModelEnum(
                 name=enum.name,
                 values=values,
@@ -246,7 +248,8 @@ class EarlyModelToModel:
                 parent_raw=getattr(enum, 'parent_raw', None),
                 file=getattr(enum, 'file', None),
                 line=getattr(enum, 'line', None),
-                namespace=getattr(enum, 'namespace', None)
+                namespace=getattr(enum, 'namespace', None),
+                is_options=is_options
             )
             # Find QFN for this enum
             qfn = None
@@ -993,7 +996,10 @@ class EarlyModelToModel:
                 # Promote inline enums/options to top-level enums in the containing namespace
                 # Handle both inline enums and inline options
                 if (getattr(field, 'is_inline_enum', False) or getattr(field, 'is_inline_options', False)) and getattr(field, 'inline_values_raw', None):
-                    enum_name = f"{msg.name}_{field.name}"
+                    # Use CamelCase promoted name for inline enums/options: MessageName + FieldName
+                    def camel_case_concat(a, b):
+                        return (a[:1].upper() + a[1:] if a else '') + (b[:1].upper() + b[1:] if b else '')
+                    enum_name = camel_case_concat(msg.name, field.name)
                     enum_values = [
                         ModelEnumValue(
                             v.get('name', '?'),

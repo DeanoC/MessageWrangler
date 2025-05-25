@@ -54,7 +54,7 @@ def promote_inline_enums(early_model: EarlyModel):
         new_enums = []
 
         for msg in getattr(ns, 'messages', []):
-            # Promote inline enums in this message as before
+            # Promote inline enums and inline options in this message
             for field in getattr(msg, 'fields', []):
                 # 1. Normal inline enum promotion
                 if getattr(field, 'is_inline_enum', False) and getattr(field, 'inline_values_raw', None):
@@ -76,6 +76,37 @@ def promote_inline_enums(early_model: EarlyModel):
                     new_enums.append(new_enum)
                     # Update the field to reference the new enum
                     field.is_inline_enum = False
+                    field.inline_values_raw = None
+                    field.type_name = enum_name
+                    field.type_type = 'enum_type'
+                # 1b. Inline options promotion: promote to open enum with bitflag values and is_options_raw flag
+                if getattr(field, 'is_inline_options', False) and getattr(field, 'inline_values_raw', None):
+                    def camel_case(parts):
+                        return ''.join(p[:1].upper() + p[1:] for p in parts if p)
+                    enum_name = camel_case([msg.name, field.name])
+                    print(f"[DEBUG] Promoting inline options: {enum_name} with values {[v.get('name', '?') for v in field.inline_values_raw]}")
+                    # Assign bitflag values
+                    values = []
+                    for idx, v in enumerate(field.inline_values_raw):
+                        values.append(EarlyEnumValue(
+                            v.get('name', '?'), 1 << idx, field.file, field.namespace, field.line, comment=v.get('comment', None), doc=v.get('doc', None)
+                        ))
+                    new_enum = EarlyEnum(
+                        name=enum_name,
+                        values=values,
+                        file=field.file,
+                        namespace=field.namespace,
+                        line=field.line,
+                        parent_raw=None,
+                        is_open_raw=True,
+                        comment=field.comment,
+                        doc=field.doc
+                    )
+                    # Mark as originally options
+                    setattr(new_enum, 'is_options_raw', True)
+                    new_enums.append(new_enum)
+                    # Update the field to reference the new enum
+                    field.is_inline_options = False
                     field.inline_values_raw = None
                     field.type_name = enum_name
                     field.type_type = 'enum_type'

@@ -29,7 +29,11 @@ class AssignDummyOptionEnumsTransform:
                                     if tname and tname.lower() not in ("int", "string", "bool", "float", "double", "map", "array", "options", "compound"):
                                         type_name = get_local_name(tname)
                                         break
-                            if type_name and type_name not in enums_by_name:
+                            # Only add a dummy if no enum with this name exists, or if the existing one has no values and is not a real enum
+                            if type_name and (
+                                type_name not in enums_by_name or
+                                (hasattr(enums_by_name[type_name], 'values') and not enums_by_name[type_name].values and getattr(enums_by_name[type_name], 'is_dummy', False))
+                            ):
                                 # Insert dummy enum as a real ModelEnum-like object
                                 class DummyEnum:
                                     def __init__(self, name):
@@ -38,7 +42,9 @@ class AssignDummyOptionEnumsTransform:
                                         self.doc = None
                                         self.is_dummy = True
                                         self.parent = None
-                                ns.enums.append(DummyEnum(type_name))
+                                # Only add if not already present as a dummy
+                                if type_name not in enums_by_name:
+                                    ns.enums.append(DummyEnum(type_name))
                 walk_namespaces(getattr(ns, 'namespaces', []), ns)
         walk_namespaces(getattr(model, 'namespaces', []))
         return model
