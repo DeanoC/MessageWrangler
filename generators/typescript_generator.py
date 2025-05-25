@@ -25,11 +25,11 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
 
     lines = []
 
-    # --- Collect external type references for imports ---
-    import_map = {}  # file_base -> namespace_name
+    # --- Collect external type references for imports using shared utility ---
+    from generators.generator_utils import collect_referenced_imports
+    import os
     current_file_base = None
     if hasattr(model, 'file') and model.file:
-        import os
         current_file_base = os.path.splitext(os.path.basename(model.file))[0]
 
     # Map file_base to namespace name (assume top-level namespace name matches file_base)
@@ -40,55 +40,11 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
             if ns.namespaces:
                 filebase_to_ns[ns_file_base] = ns.namespaces[0].name
 
-    def collect_imports_from_field(field):
-        for ftype, tref in zip(field.field_types, field.type_refs):
-            if ftype.name in ("ENUM", "MESSAGE") and tref is not None:
-                ref_file = getattr(tref, 'file', None)
-                if ref_file:
-                    ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
-                    if ref_file_base != current_file_base:
-                        # Use namespace import
-                        import_map[ref_file_base] = filebase_to_ns.get(ref_file_base, ref_file_base)
-
-    def collect_imports_from_parent(parent_ref):
-        if parent_ref is not None:
-            ref_file = getattr(parent_ref, 'file', None)
-            if ref_file:
-                ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
-                if ref_file_base != current_file_base:
-                    import_map[ref_file_base] = filebase_to_ns.get(ref_file_base, ref_file_base)
-
-    def collect_imports_from_ns(ns):
-        for msg in getattr(ns, 'messages', []):
-            # Collect imports for parent message reference
-            collect_imports_from_parent(getattr(msg, 'parent', None))
-            for field in getattr(msg, 'fields', []):
-                collect_imports_from_field(field)
-        for enum in getattr(ns, 'enums', []):
-            # Collect imports for parent enum reference (enum inheritance)
-            collect_imports_from_parent(getattr(enum, 'parent', None))
-        for nested in getattr(ns, 'namespaces', []):
-            collect_imports_from_ns(nested)
-
-    for ns in getattr(model, 'namespaces', []):
-        collect_imports_from_ns(ns)
-
-    # DEBUG: Print import_map and parent references
-    print(f"[TSGEN DEBUG] import_map: {import_map}", file=sys.stderr)
-    for ns in getattr(model, 'namespaces', []):
-        for msg in getattr(ns, 'messages', []):
-            if getattr(msg, 'parent', None) is not None:
-                parent = getattr(msg, 'parent')
-                print(f"[TSGEN DEBUG] Message {msg.name} parent: file={getattr(parent, 'file', None)}, name={getattr(parent, 'name', None)}", file=sys.stderr)
-        for enum in getattr(ns, 'enums', []):
-            if getattr(enum, 'parent', None) is not None:
-                parent = getattr(enum, 'parent')
-                print(f"[TSGEN DEBUG] Enum {enum.name} parent: file={getattr(parent, 'file', None)}, name={getattr(parent, 'name', None)}", file=sys.stderr)
-
-    # --- Emit namespace import statements ---
-    for import_file, ns_name in sorted(import_map.items()):
+    referenced_imports = collect_referenced_imports(model)
+    for import_file in sorted(referenced_imports):
+        ns_name = filebase_to_ns.get(import_file, import_file)
         lines.append(f"import * as {ns_name} from './{import_file}';")
-    if import_map:
+    if referenced_imports:
         lines.append("")
 
     def get_local_name(name, parent_ns=None):
@@ -196,18 +152,25 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         if ftype.name == "MESSAGE":
             if tref is not None and hasattr(tref, 'name'):
                 ref_file = getattr(tref, 'file', None)
+                ref_ns = getattr(tref, 'namespace', None)
+                model_ns = None
+                if hasattr(model, 'file') and model.file:
+                    model_ns = os.path.splitext(os.path.basename(model.file))[0]
                 if ref_file:
                     ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
                     if ref_file_base != current_file_base:
                         ns_name = filebase_to_ns.get(ref_file_base, ref_file_base)
                         return f"{ns_name}.{get_local_name(tref.name, parent_ns)}"
+                    # If the referenced type is in a nested namespace, qualify it
+                    if ref_ns and ref_ns != model_ns:
+                        return f"{ref_ns}.{get_local_name(tref.name, parent_ns)}"
                 return get_local_name(tref.name, parent_ns)
-            return "any"
+            raise RuntimeError(f"Unresolved MESSAGE type for field '{getattr(field, 'name', None)}' in parent '{getattr(field.parent, 'name', None) if field and hasattr(field, 'parent') else None}'")
         if ftype.name == "COMPOUND":
             if field is not None and hasattr(field, 'parent') and hasattr(field, 'name'):
                 return f"{get_local_name(field.parent.name, parent_ns)}_{get_local_name(field.name, parent_ns)}_Compound"
-            return "any"
-        return "any"
+            raise RuntimeError(f"Unresolved COMPOUND type for field '{getattr(field, 'name', None)}' in parent '{getattr(field.parent, 'name', None) if field and hasattr(field, 'parent') else None}'")
+        raise RuntimeError(f"Unresolved or unknown type '{ftype.name}' for field '{getattr(field, 'name', None)}' in parent '{getattr(field.parent, 'name', None) if field and hasattr(field, 'parent') else None}'")
 
     def emit_message(msg, indent="", parent_ns=None):
         if msg.doc:

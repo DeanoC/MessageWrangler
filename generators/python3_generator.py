@@ -29,49 +29,10 @@ def generate_python3_code(model: Model, module_name: str = "messages", transform
     for ns in getattr(model, 'namespaces', []):
         debug_print_enum_parents(ns)
 
-    # --- Collect imports for referenced base enums/messages (robust, post-model-build) ---
+    # --- Collect imports for referenced base enums/messages using shared utility ---
+    from generators.generator_utils import collect_referenced_imports
     import_lines = ["from __future__ import annotations", "from enum import Enum", "from dataclasses import dataclass"]
-    referenced_imports = set()
-
-    def get_file_level_ns_for_obj(obj):
-        file_attr = getattr(obj, 'file', None)
-        if file_attr:
-            import os
-            return os.path.splitext(os.path.basename(file_attr))[0]
-        return None
-
-    def collect_referenced_imports_ns(ns):
-        # Enums: check parent
-        for enum in getattr(ns, 'enums', []):
-            if enum.parent is not None:
-                parent_mod = get_file_level_ns_for_obj(enum.parent)
-                this_mod = get_file_level_ns_for_obj(model)
-                if parent_mod and parent_mod != this_mod:
-                    referenced_imports.add(parent_mod)
-        # Messages: check parent (if inheritance is supported)
-        for msg in getattr(ns, 'messages', []):
-            if hasattr(msg, 'parent') and msg.parent is not None:
-                # parent is a ModelReference or ModelMessage
-                parent_obj = msg.parent
-                parent_mod = get_file_level_ns_for_obj(parent_obj)
-                this_mod = get_file_level_ns_for_obj(model)
-                if parent_mod and parent_mod != this_mod:
-                    referenced_imports.add(parent_mod)
-            # Fields: check type_refs for referenced enums/messages from other files
-            for field in getattr(msg, 'fields', []):
-                for tref in getattr(field, 'type_refs', []):
-                    if tref is not None and hasattr(tref, 'file'):
-                        tref_mod = get_file_level_ns_for_obj(tref)
-                        this_mod = get_file_level_ns_for_obj(model)
-                        if tref_mod and tref_mod != this_mod:
-                            referenced_imports.add(tref_mod)
-        # Nested namespaces
-        for nested in getattr(ns, 'namespaces', []):
-            collect_referenced_imports_ns(nested)
-
-    for ns in getattr(model, 'namespaces', []):
-        collect_referenced_imports_ns(ns)
-    # Emit import lines for referenced imports (using file-level namespace/module name)
+    referenced_imports = collect_referenced_imports(model)
     for imp in sorted(referenced_imports):
         import_lines.append(f"from .{imp} import *")
     lines = import_lines + [""]
@@ -186,25 +147,20 @@ def generate_python3_code(model: Model, module_name: str = "messages", transform
                     return py_type_helper(ftypes[0], trefs[0])
                 def py_type_helper(ftype, tref):
                     from model import FieldType, ModelReference
+                    import os
                     def get_enum_type_name(enum_ref):
                         if enum_ref is None:
                             return "str"  # fallback for unresolved enum
-                        ns_chain = []
-                        ns = getattr(enum_ref, 'parent_namespace', None)
-                        while ns is not None:
-                            ns_chain.insert(0, ns.name)
-                            ns = getattr(ns, 'parent_namespace', None)
-                        file_ns = module_name
-                        if ns_chain and ns_chain[0] != file_ns:
-                            ns_chain.insert(0, file_ns)
-                        elif not ns_chain:
-                            ns_chain = [file_ns]
                         enum_name = getattr(enum_ref, 'name', str(enum_ref))
-                        ns_prefix = '_'.join(ns_chain)
-                        if enum_name.startswith(ns_prefix + '_'):
-                            enum_name = enum_name[len(ns_prefix) + 1:]
-                        # Use only the local name for type hints
-                        return enum_name
+                        # Only use local name if in same file-level namespace
+                        enum_file = getattr(enum_ref, 'file', None)
+                        model_file = getattr(model, 'file', None)
+                        if enum_file and model_file:
+                            enum_file_base = os.path.splitext(os.path.basename(enum_file))[0]
+                            model_file_base = os.path.splitext(os.path.basename(model_file))[0]
+                            if enum_file_base == model_file_base:
+                                return enum_name
+                        return enum_name  # fallback: just name
                     def find_message_in_namespaces(local_name, namespaces, parent_path=None):
                         if parent_path is None:
                             parent_path = []
@@ -246,39 +202,30 @@ def generate_python3_code(model: Model, module_name: str = "messages", transform
                     if ftype == FieldType.ENUM:
                         if tref is None:
                             return "str"  # fallback for unresolved enum
-                        name = get_enum_type_name(tref)
-                        if name == "Any":
-                            return "str"
-                        # Always use fully qualified name for file-level namespace types
-                        file_ns = module_name
-                        ns_chain = []
-                        ns = getattr(tref, 'parent_namespace', None)
-                        while ns is not None:
-                            ns_chain.insert(0, ns.name)
-                            ns = getattr(ns, 'parent_namespace', None)
-                        if not ns_chain or (len(ns_chain) == 1 and ns_chain[0] == file_ns):
-                            return f"{file_ns}.{get_local_name(getattr(tref, 'name', ''))}"
-                        return name
+                        enum_name = getattr(tref, 'name', str(tref))
+                        enum_file = getattr(tref, 'file', None)
+                        model_file = getattr(model, 'file', None)
+                        if enum_file and model_file:
+                            import os
+                            enum_file_base = os.path.splitext(os.path.basename(enum_file))[0]
+                            model_file_base = os.path.splitext(os.path.basename(model_file))[0]
+                            if enum_file_base == model_file_base:
+                                return enum_name
+                        return enum_name
                     if ftype == FieldType.MESSAGE:
                         if tref is None:
                             return "str"  # fallback for unresolved message
-                        if hasattr(tref, 'name'):
-                            file_ns = module_name
-                            msg_ns = getattr(tref, 'parent_namespace', None)
-                            if msg_ns is None or (getattr(msg_ns, 'name', None) == file_ns):
-                                return f"{file_ns}.{get_local_name(getattr(tref, 'name', ''))}"
-                            return get_local_name(getattr(tref, 'name', ''))
-                        if hasattr(tref, 'qfn'):
-                            qfn = getattr(tref, 'qfn')
-                            local_name = qfn.split('::')[-1]
-                            found = find_message_in_namespaces(local_name, getattr(model, 'namespaces', []))
-                            if found:
-                                return found
-                        if isinstance(tref, str):
-                            found = find_message_in_namespaces(tref, getattr(model, 'namespaces', []))
-                            if found:
-                                return found
-                        return "str"  # fallback for unresolved message
+                        msg_name = getattr(tref, 'name', str(tref))
+                        msg_ns = getattr(tref, 'namespace', None)
+                        model_file = getattr(model, 'file', None)
+                        model_ns = None
+                        if model_file:
+                            import os
+                            model_ns = os.path.splitext(os.path.basename(model_file))[0]
+                        # If the referenced message is in a nested namespace, emit Namespace.ClassName
+                        if msg_ns and msg_ns != model_ns:
+                            return f"{msg_ns}.{msg_name}"
+                        return msg_name
                     if ftype == FieldType.COMPOUND:
                         compound_name = f"{get_local_name(getattr(msg, 'name', '?'))}_{get_local_name(getattr(field, 'name', '?'))}_Compound"
                         return compound_name

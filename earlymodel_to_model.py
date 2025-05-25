@@ -523,7 +523,14 @@ class EarlyModelToModel:
                     if vtype == FieldType.ENUM and vtype_ref_qfn:
                         map_value_type_ref = enum_model_lookup.get(enum_lookup[vtype_ref_qfn])
                     elif vtype == FieldType.MESSAGE and vtype_ref_qfn:
+                        # Set ModelReference and attach name/file for generator
                         map_value_type_ref = ModelReference(vtype_ref_qfn, kind='message')
+                        msg_obj = msg_lookup.get(vtype_ref_qfn)
+                        if msg_obj is not None:
+                            if hasattr(msg_obj, 'name'):
+                                map_value_type_ref.name = getattr(msg_obj, 'name', None)
+                            if hasattr(msg_obj, 'file'):
+                                map_value_type_ref.file = getattr(msg_obj, 'file', None)
                     type_refs.append(None)  # MAP itself has no ref
                     type_refs.append(map_key_type_ref)
                     type_refs.append(map_value_type_ref)
@@ -659,10 +666,25 @@ class EarlyModelToModel:
                     type_refs.append(resolved_enum)
                 # MESSAGE
                 elif ftype == FieldType.MESSAGE:
-                    if ref_qfn:
-                        # Use ModelReference for message fields
-                        type_ref = ModelReference(ref_qfn, kind='message')
-                        type_names.append(ref_qfn)
+                    # Always try to resolve the message reference for type_ref
+                    resolved_ref_qfn = ref_qfn
+                    if not resolved_ref_qfn and type_name and type_name != '?':
+                        # Try to resolve by suffix (unqualified name)
+                        for qfn in msg_lookup.keys():
+                            if qfn.endswith(f'::{type_name}') or qfn == type_name:
+                                resolved_ref_qfn = qfn
+                                break
+                    if resolved_ref_qfn and resolved_ref_qfn in msg_lookup:
+                        msg_obj = msg_lookup[resolved_ref_qfn]
+                        type_ref = ModelReference(resolved_ref_qfn, kind='message')
+                        # Attach name, file, and namespace for generator
+                        if hasattr(msg_obj, 'name'):
+                            type_ref.name = getattr(msg_obj, 'name', None)
+                        if hasattr(msg_obj, 'file'):
+                            type_ref.file = getattr(msg_obj, 'file', None)
+                        if hasattr(msg_obj, 'namespace'):
+                            type_ref.namespace = getattr(msg_obj, 'namespace', None)
+                        type_names.append(resolved_ref_qfn)
                     else:
                         type_names.append(type_name)
                         type_ref = None
@@ -677,10 +699,26 @@ class EarlyModelToModel:
                     if etype == FieldType.ENUM and etype_ref_qfn:
                         element_type_ref = enum_model_lookup.get(enum_lookup[etype_ref_qfn])
                         type_names.append(etype_ref_qfn)
-                    elif etype == FieldType.MESSAGE and etype_ref_qfn:
-                        # Use ModelReference for array element if message
-                        element_type_ref = ModelReference(etype_ref_qfn, kind='message')
-                        type_names.append(etype_ref_qfn)
+                    elif etype == FieldType.MESSAGE:
+                        resolved_ref_qfn = etype_ref_qfn
+                        if not resolved_ref_qfn and etype_raw and etype_raw != '?':
+                            for qfn in msg_lookup.keys():
+                                if qfn.endswith(f'::{etype_raw}') or qfn == etype_raw:
+                                    resolved_ref_qfn = qfn
+                                    break
+                        if resolved_ref_qfn and resolved_ref_qfn in msg_lookup:
+                            msg_obj = msg_lookup[resolved_ref_qfn]
+                            element_type_ref = ModelReference(resolved_ref_qfn, kind='message')
+                            # Attach name, file, and namespace for generator
+                            if hasattr(msg_obj, 'name'):
+                                element_type_ref.name = getattr(msg_obj, 'name', None)
+                            if hasattr(msg_obj, 'file'):
+                                element_type_ref.file = getattr(msg_obj, 'file', None)
+                            if hasattr(msg_obj, 'namespace'):
+                                element_type_ref.namespace = getattr(msg_obj, 'namespace', None)
+                            type_names.append(resolved_ref_qfn)
+                        else:
+                            type_names.append(etype_raw)
                     else:
                         type_names.append(etype_raw)
                     type_refs.append(None)  # ARRAY itself has no ref
@@ -738,11 +776,28 @@ class EarlyModelToModel:
                     if ktype == FieldType.ENUM and ktype_ref_qfn:
                         map_key_type_ref = enum_model_lookup.get(enum_lookup[ktype_ref_qfn])
                     elif ktype == FieldType.MESSAGE and ktype_ref_qfn:
-                        map_key_type_ref = msg_model_lookup.get(msg_lookup[ktype_ref_qfn])
+                        # Set ModelReference and attach name, file, and namespace for generator
+                        map_key_type_ref = ModelReference(ktype_ref_qfn, kind='message')
+                        msg_obj = msg_lookup.get(ktype_ref_qfn)
+                        if msg_obj is not None:
+                            if hasattr(msg_obj, 'name'):
+                                map_key_type_ref.name = getattr(msg_obj, 'name', None)
+                            if hasattr(msg_obj, 'file'):
+                                map_key_type_ref.file = getattr(msg_obj, 'file', None)
+                            if hasattr(msg_obj, 'namespace'):
+                                map_key_type_ref.namespace = getattr(msg_obj, 'namespace', None)
                     if vtype == FieldType.ENUM and vtype_ref_qfn:
                         map_value_type_ref = enum_model_lookup.get(enum_lookup[vtype_ref_qfn])
                     elif vtype == FieldType.MESSAGE and vtype_ref_qfn:
                         map_value_type_ref = ModelReference(vtype_ref_qfn, kind='message')
+                        msg_obj = msg_lookup.get(vtype_ref_qfn)
+                        if msg_obj is not None:
+                            if hasattr(msg_obj, 'name'):
+                                map_value_type_ref.name = getattr(msg_obj, 'name', None)
+                            if hasattr(msg_obj, 'file'):
+                                map_value_type_ref.file = getattr(msg_obj, 'file', None)
+                            if hasattr(msg_obj, 'namespace'):
+                                map_value_type_ref.namespace = getattr(msg_obj, 'namespace', None)
                     type_refs.append(None)  # MAP itself has no ref
                     type_refs.append(map_key_type_ref)
                     type_refs.append(map_value_type_ref)
@@ -821,7 +876,28 @@ class EarlyModelToModel:
             parent_ref = None
             parent_raw = getattr(msg, 'parent_raw', None)
             if parent_raw:
-                parent_ref = ModelReference(parent_raw, kind='message')
+                # Map parent_raw using alias_map if it starts with an alias (like Base::)
+                mapped_parent_raw = parent_raw
+                if parent_raw and isinstance(parent_raw, str) and '::' in parent_raw and alias_map:
+                    first = parent_raw.split('::', 1)[0]
+                    if first in alias_map:
+                        mapped_parent_raw = alias_map[first] + '::' + parent_raw.split('::', 1)[1]
+                # Try to resolve the mapped_parent_raw QFN to set name and file for generator import logic
+                resolved_parent_qfn = mapped_parent_raw
+                if resolved_parent_qfn not in msg_lookup and mapped_parent_raw and mapped_parent_raw != '?':
+                    for qfn in msg_lookup.keys():
+                        if qfn.endswith(f'::{mapped_parent_raw}') or qfn == mapped_parent_raw:
+                            resolved_parent_qfn = qfn
+                            break
+                parent_ref = ModelReference(resolved_parent_qfn, kind='message')
+                parent_msg_obj = msg_lookup.get(resolved_parent_qfn)
+                if parent_msg_obj is not None:
+                    if hasattr(parent_msg_obj, 'name'):
+                        parent_ref.name = getattr(parent_msg_obj, 'name', None)
+                    if hasattr(parent_msg_obj, 'file'):
+                        parent_ref.file = getattr(parent_msg_obj, 'file', None)
+                    if hasattr(parent_msg_obj, 'namespace'):
+                        parent_ref.namespace = getattr(parent_msg_obj, 'namespace', None)
             model_msg = ModelMessage(
                 name=msg.name,
                 fields=fields,
@@ -833,6 +909,9 @@ class EarlyModelToModel:
                 line=getattr(msg, 'line', None),
                 namespace=getattr(msg, 'namespace', None)
             )
+            # Set parent reference on all fields
+            for field in fields:
+                field.parent = model_msg
             msg_model_lookup[msg] = model_msg
             return model_msg
 

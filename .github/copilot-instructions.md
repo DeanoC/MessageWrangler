@@ -25,5 +25,8 @@ Once a Model is created, it the input to the generators.
    - (TODO) C++ std20 - generates C++ source files using C++20 features
    - (TODO) C++ unreal5 - generates C++ source files for Unreal Engine 5
 
+## Notes
+When debugging, always challenge your assumptions. Verify that the input where the error happens is valid. Use prior test and debug print to validate you are getting what you think you should.
+If we find a bug or error in the code, we should write a test that reproduces the error and fails, and then fix the code to make the test pass. This way we ensure that the bug is fixed and does not reappear in the future.
 
-When debugging, always challenge your assumptions. Verify that the input where the error happens is valid. Use prior test and debug print to validate you are getting what you think you shoulld.
+For generators, generator_utils.py contains shared utility functions for collecting imports and other common tasks.

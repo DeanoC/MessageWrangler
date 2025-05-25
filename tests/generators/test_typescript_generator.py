@@ -1,3 +1,38 @@
+def test_typescript_generator_nested_namespace_qualification():
+    """
+    Ensure that fields referencing nested namespace types (e.g., TestNS.Nested) are correctly qualified in the generated TypeScript.
+    """
+    def_path = os.path.join("tests", "def", "test_arrays_and_references.def")
+    early_model, all_early_models = load_early_model_with_imports(def_path)
+    model = EarlyModelToModel().process(early_model)
+    ts_code = generate_typescript_code(model)
+    # Write the generated TypeScript code to generated/typescript/
+    output_dir = os.path.join("generated", "typescript")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "test_arrays_and_references.ts")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(ts_code)
+
+    # Read the generated TypeScript output
+    with open(output_path, "r", encoding="utf-8") as f:
+        ts_out = f.read()
+
+    # Check that WithNamespaceRef fields are correctly qualified
+    # Should be: nested: TestNS.Nested; nestedArray: TestNS.Nested[];
+    found_nested = False
+    found_nested_array = False
+    for line in ts_out.splitlines():
+        if "WithNamespaceRef" in line:
+            # Start of the interface block
+            continue
+        if "nested:" in line:
+            found_nested = True
+            assert ": TestNS.Nested" in line, f"Field 'nested' should be qualified as 'TestNS.Nested' in WithNamespaceRef, got: {line}"
+        if "nestedArray:" in line:
+            found_nested_array = True
+            assert ": TestNS.Nested[]" in line, f"Field 'nestedArray' should be qualified as 'TestNS.Nested[]' in WithNamespaceRef, got: {line}"
+    assert found_nested, "Field 'nested' not found in WithNamespaceRef interface in generated TypeScript."
+    assert found_nested_array, "Field 'nestedArray' not found in WithNamespaceRef interface in generated TypeScript."
 import os
 import glob
 import pytest
@@ -52,11 +87,6 @@ def test_typescript_generator_generates_code(def_path):
                     ts_imports.add(import_file_base)
         return ts_imports
 
-    # Only check 1-to-1 mapping if TypeScript output was generated and read
-    if 'ts_out' in locals():
-        def_imports = parse_def_imports(def_path)
-        ts_imports = parse_ts_imports(ts_out)
-        assert def_imports == ts_imports, f"Mismatch between .def imports {def_imports} and TypeScript imports {ts_imports} in {output_path}"
     early_model, all_early_models = load_early_model_with_imports(def_path)
     model = EarlyModelToModel().process(early_model)
     # DEBUG: Print ModelField for 'typeX' in CommCommand if present
@@ -143,6 +173,21 @@ def test_typescript_generator_generates_code(def_path):
                             ref_file_base = os.path.splitext(os.path.basename(ref_file))[0]
                             if ref_file_base != current_file_base:
                                 referenced_types.add((ref_file_base, ref_name))
+    # Only check 1-to-1 mapping if TypeScript output was generated and read
+    if 'ts_out' in locals():
+        def_imports = parse_def_imports(def_path)
+        ts_imports = parse_ts_imports(ts_out)
+        assert def_imports == ts_imports, f"Mismatch between .def imports {def_imports} and TypeScript imports {ts_imports} in {output_path}"
+ 
+    # 6. Validate that 'any' is never used as a type in the generated TypeScript code
+    # This ensures all types are known and written into the generated file (closed system)
+    if 'ts_out' in locals():
+        for line in ts_out.splitlines():
+            if ": any" in line or ": any[]" in line:
+                assert False, f"Type 'any' found in generated TypeScript: {line} in {output_path}. All types should be known and explicit."
+
+
+ 
     # Now check that each referenced type is present in an import statement
     for ref_file_base, ref_name in referenced_types:
         found = False
