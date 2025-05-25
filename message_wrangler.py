@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """
+CURRENTLY NOT FUNCTIONAL
 MessageWrangler
 
 This script processes a specific format in a file and transforms it into formats

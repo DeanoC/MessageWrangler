@@ -30,3 +30,5 @@ When debugging, always challenge your assumptions. Verify that the input where t
 If we find a bug or error in the code, we should write a test that reproduces the error and fails, and then fix the code to make the test pass. This way we ensure that the bug is fixed and does not reappear in the future.
 
 For generators, generator_utils.py contains shared utility functions for collecting imports and other common tasks.
+
+cpp_generator_std23.py is currently non functionalal and should be ignored for now. It is a work in progress and will be updated later.

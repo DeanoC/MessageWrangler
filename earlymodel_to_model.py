@@ -317,11 +317,8 @@ class EarlyModelToModel:
                 if ftype == FieldType.ENUM and ref_qfn and (ref_qfn in enum_lookup or ref_qfn in self.model_enum_by_qfn):
                     # Find the enum object
                     enum_obj = enum_lookup.get(ref_qfn) or self.model_enum_by_qfn.get(ref_qfn)
-                    type_ref = ModelReference(ref_qfn, kind='enum')
-                    if enum_obj is not None:
-                        type_ref.name = getattr(enum_obj, 'name', None)
-                        type_ref.file = getattr(enum_obj, 'file', None)
-                        type_ref.namespace = getattr(enum_obj, 'namespace', None)
+                    # PATCH: Set type_ref to the actual ModelEnum object, not ModelReference
+                    type_ref = enum_obj if enum_obj is not None else None
                     field_types.clear()
                     type_refs.clear()
                     type_names.clear()
@@ -707,10 +704,7 @@ class EarlyModelToModel:
                                 promoted_enum_qfn = k
                                 break
                         if promoted_enum_qfn:
-                            type_ref = ModelReference(promoted_enum_qfn, kind='enum')
-                            type_ref.name = promoted_enum.name
-                            type_ref.file = getattr(promoted_enum, 'file', None)
-                            type_ref.namespace = getattr(promoted_enum, 'namespace', None)
+                            type_ref = promoted_enum
                         else:
                             type_ref = promoted_enum
                         type_names.append(promoted_name)
@@ -723,21 +717,14 @@ class EarlyModelToModel:
                             # Overwrite type_names to ensure the correct enum name is used
                             type_names.clear()
                             type_names.append(qfn_hint.split('::')[-1])
-                            # Always set type_ref to a ModelReference for resolved enums
-                            type_ref = ModelReference(qfn_hint, kind='enum')
-                            type_ref.name = resolved_enum.name
-                            type_ref.file = getattr(resolved_enum, 'file', None)
-                            type_ref.namespace = getattr(resolved_enum, 'namespace', None)
+                            type_ref = resolved_enum
                     # Otherwise, try normal enum resolution
                     if not resolved_enum:
                         # Try direct QFN
                         if ref_qfn and ref_qfn in self.model_enum_by_qfn:
                             resolved_enum = self.model_enum_by_qfn[ref_qfn]
                             type_names.append(ref_qfn)
-                            type_ref = ModelReference(ref_qfn, kind='enum')
-                            type_ref.name = resolved_enum.name
-                            type_ref.file = getattr(resolved_enum, 'file', None)
-                            type_ref.namespace = getattr(resolved_enum, 'namespace', None)
+                            type_ref = resolved_enum
                         # Try alias mapping if not found
                         elif ref_qfn and alias_map:
                             parts = ref_qfn.split('::')
@@ -748,10 +735,7 @@ class EarlyModelToModel:
                                     resolved_enum = self.model_enum_by_qfn[mapped_qfn]
                                     ref_qfn = mapped_qfn
                                     type_names.append(mapped_qfn)
-                                    type_ref = ModelReference(mapped_qfn, kind='enum')
-                                    type_ref.name = resolved_enum.name
-                                    type_ref.file = getattr(resolved_enum, 'file', None)
-                                    type_ref.namespace = getattr(resolved_enum, 'namespace', None)
+                                    type_ref = resolved_enum
                                 else:
                                     mapped_parts = mapped_qfn.split('::')
                                     if len(mapped_parts) >= 2:
@@ -760,19 +744,13 @@ class EarlyModelToModel:
                                             resolved_enum = self.model_enum_by_qfn[promoted_qfn]
                                             ref_qfn = promoted_qfn
                                             type_names.append(promoted_qfn)
-                                            type_ref = ModelReference(promoted_qfn, kind='enum')
-                                            type_ref.name = resolved_enum.name
-                                            type_ref.file = getattr(resolved_enum, 'file', None)
-                                            type_ref.namespace = getattr(resolved_enum, 'namespace', None)
+                                            type_ref = resolved_enum
                                 mapped_qfn = alias_map[parts[0]] + ('::' + '::'.join(parts[1:]) if len(parts) > 1 else '')
                                 if mapped_qfn in enum_lookup:
                                     resolved_enum = enum_model_lookup.get(enum_lookup[mapped_qfn])
                                     resolved_qfn = mapped_qfn
                                     type_names.append(mapped_qfn)
-                                    type_ref = ModelReference(mapped_qfn, kind='enum')
-                                    type_ref.name = resolved_enum.name if resolved_enum else None
-                                    type_ref.file = getattr(resolved_enum, 'file', None) if resolved_enum else None
-                                    type_ref.namespace = getattr(resolved_enum, 'namespace', None) if resolved_enum else None
+                                    type_ref = resolved_enum
                         # Try to resolve by searching all enums by suffix (unqualified name)
                         if not resolved_enum and ref_qfn:
                             for qfn, early_enum in enum_lookup.items():
@@ -780,10 +758,7 @@ class EarlyModelToModel:
                                     resolved_enum = enum_model_lookup.get(early_enum)
                                     if resolved_enum:
                                         type_names.append(qfn)
-                                        type_ref = ModelReference(qfn, kind='enum')
-                                        type_ref.name = resolved_enum.name
-                                        type_ref.file = getattr(resolved_enum, 'file', None)
-                                        type_ref.namespace = getattr(resolved_enum, 'namespace', None)
+                                        type_ref = resolved_enum
                                         break
                         # Try to resolve by searching all enums by field type_name (if ref_qfn is None)
                         if not resolved_enum and type_name and type_name != '?':
@@ -792,10 +767,7 @@ class EarlyModelToModel:
                                     resolved_enum = enum_model_lookup.get(early_enum)
                                     if resolved_enum:
                                         type_names.append(qfn)
-                                        type_ref = ModelReference(qfn, kind='enum')
-                                        type_ref.name = resolved_enum.name
-                                        type_ref.file = getattr(resolved_enum, 'file', None)
-                                        type_ref.namespace = getattr(resolved_enum, 'namespace', None)
+                                        type_ref = resolved_enum
                                         break
                     # Extra: Try to resolve by searching enums in the current namespace if still not found
                     if not resolved_enum and type_name and type_name != '?':
@@ -804,14 +776,7 @@ class EarlyModelToModel:
                                 resolved_enum = enum
                                 if type_name not in type_names:
                                     type_names.append(type_name)
-                                # Set type_ref to a ModelReference for this enum
-                                for k, v in enum_lookup.items():
-                                    if v is enum:
-                                        type_ref = ModelReference(k, kind='enum')
-                                        type_ref.name = enum.name
-                                        type_ref.file = getattr(enum, 'file', None)
-                                        type_ref.namespace = getattr(enum, 'namespace', None)
-                                        break
+                                type_ref = enum
                                 break
                     if not resolved_enum:
                         print(f"[MODEL ERROR] Field '{getattr(field, 'name', '?')}' in message '{msg.name}' references unknown enum '{ref_qfn}'. Skipping type_ref.", file=sys.stderr)
@@ -830,10 +795,7 @@ class EarlyModelToModel:
                         for candidate in [promoted_qfn1, promoted_qfn2, promoted_qfn1_ns, promoted_qfn2_ns]:
                             if candidate in enum_lookup:
                                 enum_obj = enum_lookup[candidate]
-                                type_ref = ModelReference(candidate, kind='enum')
-                                type_ref.name = getattr(enum_obj, 'name', None)
-                                type_ref.file = getattr(enum_obj, 'file', None)
-                                type_ref.namespace = getattr(enum_obj, 'namespace', None)
+                                type_ref = enum_model_lookup.get(enum_obj, enum_obj)
                                 print(f"[PATCH] Promoted fallback: matched enum for field '{getattr(field, 'name', None)}' to QFN '{candidate}'", file=sys.stderr)
                                 found_promoted = True
                                 break
@@ -845,10 +807,7 @@ class EarlyModelToModel:
                         # Try direct QFN
                         if ref_qfn and ref_qfn in enum_lookup:
                             enum_obj = enum_lookup[ref_qfn]
-                            type_ref = ModelReference(ref_qfn, kind='enum')
-                            type_ref.name = getattr(enum_obj, 'name', None)
-                            type_ref.file = getattr(enum_obj, 'file', None)
-                            type_ref.namespace = getattr(enum_obj, 'namespace', None)
+                            type_ref = enum_model_lookup.get(enum_obj, enum_obj)
                         else:
                             # Enhanced fallback: handle references like MessageName.field or Namespace::MessageName.field
                             if type_name and ('.' in type_name or '::' in type_name):
@@ -862,20 +821,14 @@ class EarlyModelToModel:
                                     candidate_enum_qfn = f"{msg_qfn}::{enum_field}"
                                     if candidate_enum_qfn in enum_lookup:
                                         enum_obj = enum_lookup[candidate_enum_qfn]
-                                        type_ref = ModelReference(candidate_enum_qfn, kind='enum')
-                                        type_ref.name = getattr(enum_obj, 'name', None)
-                                        type_ref.file = getattr(enum_obj, 'file', None)
-                                        type_ref.namespace = getattr(enum_obj, 'namespace', None)
+                                        type_ref = enum_model_lookup.get(enum_obj, enum_obj)
                                         break
                             # Fallback: search all enums for a match by field name and parent message/namespace
                             if type_ref is None:
                                 field_name = getattr(field, 'name', None)
                                 for qfn, enum_obj in enum_lookup.items():
                                     if qfn.split('::')[-1] == field_name:
-                                        type_ref = ModelReference(qfn, kind='enum')
-                                        type_ref.name = getattr(enum_obj, 'name', None)
-                                        type_ref.file = getattr(enum_obj, 'file', None)
-                                        type_ref.namespace = getattr(enum_obj, 'namespace', None)
+                                        type_ref = enum_model_lookup.get(enum_obj, enum_obj)
                                         print(f"[PATCH] Fallback: matched enum for field '{field_name}' to QFN '{qfn}'", file=sys.stderr)
                                         break
                     # --- PATCH: Ensure enum fields have aligned field_types/type_refs/type_names ---
@@ -1038,7 +991,8 @@ class EarlyModelToModel:
                     type_refs.append(None)
                     type_names.append(type_name)
                 # Promote inline enums/options to top-level enums in the containing namespace
-                if getattr(field, 'is_inline_enum', False) and getattr(field, 'inline_values_raw', None):
+                # Handle both inline enums and inline options
+                if (getattr(field, 'is_inline_enum', False) or getattr(field, 'is_inline_options', False)) and getattr(field, 'inline_values_raw', None):
                     enum_name = f"{msg.name}_{field.name}"
                     enum_values = [
                         ModelEnumValue(
@@ -1068,7 +1022,15 @@ class EarlyModelToModel:
                         ns_for_inline.enums.append(model_enum)
                     # Set type_ref to this enum
                     type_ref = model_enum
+                    # Overwrite type_names and type_refs for options fields as well
+                    type_names.clear()
+                    type_refs.clear()
                     type_names.append(enum_name)
+                    type_refs.append(model_enum)
+                    # PATCH: If this is an inline options, set the field type to OPTIONS
+                    if getattr(field, 'is_inline_options', False):
+                        field_types.clear()
+                        field_types.append(FieldType.OPTIONS)
                 # Map modifiers_raw (list of str) to FieldModifier enum values
                 modifiers_raw = getattr(field, 'modifiers_raw', [])
                 modifiers = []

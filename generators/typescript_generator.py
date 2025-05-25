@@ -47,29 +47,52 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
     if referenced_imports:
         lines.append("")
 
-    def get_local_name(name, parent_ns=None):
-        # Always return only the base name (after last '_' or '::')
+    def get_local_name(name, parent_ns=None, keep_full_for_options=False):
+        # For options and promoted types, use CamelCase with no underscores (new convention)
+        if keep_full_for_options:
+            name = name.replace('::', '')
+            parts = name.split('_')
+            # Use str[0].upper() + str[1:] to preserve original casing after the first letter
+            def camel_part(part):
+                return part[:1].upper() + part[1:] if part else ''
+            name = ''.join(camel_part(part) for part in parts)
+            return name
+        # Default: return only the base name (after last '::' or '_'), no underscores allowed
         if '::' in name:
             name = name.split('::')[-1]
         if '_' in name:
             name = name.split('_')[-1]
+        name = name.replace('_', '')
         return name
 
-    def emit_enum(enum, indent="", parent_ns=None):
+    def emit_enum(enum, indent="", parent_ns=None, is_options=False):
         enum_name = get_local_name(enum.name, parent_ns)
         if enum.doc:
             for line in (enum.doc or '').strip().splitlines():
                 lines.append(f"{indent}// {line}")
-        if getattr(enum, 'is_open', False):
-            # Emit as a type alias: union of known values plus number
-            all_values = enum.get_all_values() if hasattr(enum, 'get_all_values') else enum.values
+        all_values = enum.get_all_values() if hasattr(enum, 'get_all_values') else enum.values
+        assigned = {}
+        if is_options:
+            # Assign bit values: 1, 2, 4, 8, ...
+            for idx, value in enumerate(all_values):
+                if value.value is not None:
+                    val = value.value
+                else:
+                    val = 1 << idx
+                assigned[value.name] = val
+            lines.append(f"{indent}export enum {enum_name} {{")
+            for value in all_values:
+                if value.doc:
+                    for line in (value.doc or '').strip().splitlines():
+                        lines.append(f"{indent}    // {line}")
+                lines.append(f"{indent}    {value.name} = {assigned[value.name]},")
+            lines.append(f"{indent}}}\n")
+        elif getattr(enum, 'is_open', False):
             value_literals = [str(v.value) for v in all_values]
             type_union = " | ".join(value_literals + ["number"])
             lines.append(f"{indent}export type {enum_name} = {type_union};\n")
         else:
             lines.append(f"{indent}export enum {enum_name} {{")
-            all_values = enum.get_all_values() if hasattr(enum, 'get_all_values') else enum.values
-            assigned = {}
             last_value = None
             for idx, value in enumerate(all_values):
                 if value.value is not None:
@@ -82,7 +105,6 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
                 if value.doc:
                     for line in (value.doc or '').strip().splitlines():
                         lines.append(f"{indent}    // {line}")
-                # Emit the full value.name (with prefix) for uniqueness
                 lines.append(f"{indent}    {value.name} = {assigned[value.name]},")
             lines.append(f"{indent}}}\n")
 
@@ -97,6 +119,38 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
         if ftypes[0].name == "ARRAY":
             elem_ts = ts_type_helper(ftypes[1], trefs[1], parent_ns, field)
             return f"{elem_ts}[]"
+        # Handle options type
+        if ftypes[0].name == "OPTIONS":
+            # Prefer type_refs if available and is a ModelEnum or ModelReference
+            tref = trefs[0] if trefs and len(trefs) > 0 else None
+            type_name = None
+            if tref is not None:
+                # If it's a ModelReference, use its name
+                if hasattr(tref, 'name') and tref.name:
+                    type_name = get_local_name(tref.name, parent_ns, keep_full_for_options=True)
+                # If it's a ModelEnum, use its name
+                elif hasattr(tref, 'qfn') and tref.qfn:
+                    type_name = get_local_name(tref.qfn.split('::')[-1], parent_ns, keep_full_for_options=True)
+            # Try to find the options type name in type_names
+            if not type_name and hasattr(field, 'type_names') and field.type_names:
+                for tname in field.type_names:
+                    if tname and tname.lower() not in ("int", "string", "bool", "float", "double", "map", "array", "options", "compound"):
+                        type_name = get_local_name(tname, parent_ns, keep_full_for_options=True)
+                        break
+            # If we have a type_name, check if it is defined in the output; if not, emit a fallback
+            if type_name:
+                # Check if this type will be emitted as an enum/type in the output
+                all_emitted_types = set(emitted_inline_enums)
+                for ns in getattr(model, 'namespaces', []):
+                    for enum in getattr(ns, 'enums', []):
+                        all_emitted_types.add(get_local_name(enum.name, ns.name, keep_full_for_options=True))
+                # For options, always use a promoted CamelCase name for the fallback type
+                fallback_type_name = get_local_name(type_name, parent_ns, keep_full_for_options=True)
+                if fallback_type_name not in all_emitted_types:
+                    lines.append(f"export enum {fallback_type_name} {{ /* AUTO-GENERATED DUMMY */ }}\n")
+                return fallback_type_name
+            # Fallback: use 'number'
+            return "number"
         return ts_type_helper(ftypes[0], trefs[0], parent_ns, field)
 
     def ts_type_helper(ftype, tref, parent_ns=None, field=None):
@@ -218,11 +272,37 @@ def generate_typescript_code(model: Model, module_name: str = "messages", transf
 
     def emit_namespace(ns, indent=""):
         ns_name = ns.name
-        has_content = bool(ns.enums or ns.messages or ns.namespaces)
+        has_content = bool(ns.enums or ns.messages or ns.namespaces or getattr(ns, 'options', []))
         if ns_name:
             lines.append(f"{indent}export namespace {ns_name} {{")
             indent += "    "
         emitted_enum_names = set()
+        # Emit options as enums with bit values
+        for opts in getattr(ns, 'options', []):
+            if opts.get('values_raw'):
+                # Synthesize a pseudo-enum object for options
+                class OptEnum:
+                    def __init__(self, name, values, doc=None):
+                        self.name = name
+                        self.values = values
+                        self.doc = doc
+                    def get_all_values(self):
+                        return self.values
+                class OptValue:
+                    def __init__(self, name, value, doc=None):
+                        self.name = name
+                        self.value = value
+                        self.doc = doc
+                values = []
+                for idx, v in enumerate(opts['values_raw']):
+                    val = v.get('value')
+                    if val is None:
+                        val = 1 << idx
+                    values.append(OptValue(v['name'], val, v.get('doc')))
+                # Use the promoted name for the enum (e.g., ModesAvailableReply_available)
+                promoted_name = opts.get('promoted_name') or opts.get('name')
+                opt_enum = OptEnum(promoted_name, values, opts.get('doc'))
+                emit_enum(opt_enum, indent, ns_name, is_options=True)
         for enum in getattr(ns, 'enums', []):
             enum_local_name = get_local_name(enum.name, ns_name)
             if enum_local_name in emitted_enum_names:

@@ -157,6 +157,11 @@ class Model:
                 walk_ns(nested, prefix + [ns.name] if ns.name else prefix)
         for ns in getattr(self, 'namespaces', []):
             walk_ns(ns, [])
+        # PATCH: Also include all imported models' QFN lookups for cross-file reference resolution
+        if hasattr(self, 'imports') and self.imports:
+            for imported_model in self.imports.values():
+                if hasattr(imported_model, '_qfn_lookup'):
+                    lookup.update(imported_model._qfn_lookup)
         return lookup
 
     def resolve_reference(self, ref: 'ModelReference') -> Optional[Any]:
