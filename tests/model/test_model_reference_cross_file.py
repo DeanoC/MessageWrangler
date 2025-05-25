@@ -1,7 +1,7 @@
 import os
 import pytest
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model import ModelReference
 
 def test_model_reference_resolution_across_files():
@@ -31,8 +31,7 @@ def test_model_reference_resolution_across_files():
             )
             print(f"    [DEBUG] Reference using alias: {ref_qfn} should resolve to: {real_qfn}")
 
-    from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
-    model_main = EarlyModelToModelTransform().transform(early_main)
+    model_main = EarlyModelToModel().process(early_main)
 
     # Debug: print the imports attached to the model
     print(f"[DEBUG] model_main.imports: {list(model_main.imports.keys())}")

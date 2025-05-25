@@ -3,7 +3,7 @@ import glob
 import pytest
 from generators.typescript_generator import generate_typescript_code
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import early_model_to_model
 
 def get_def_files():
     # Only include .def files that are expected to be valid for code generation
@@ -20,7 +20,7 @@ def get_def_files():
 @pytest.mark.parametrize("def_path", get_def_files())
 def test_typescript_generator_generates_code(def_path):
     early_model, all_early_models = load_early_model_with_imports(def_path)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = early_model_to_model(early_model)
     # DEBUG: Print ModelField for 'typeX' in CommCommand if present
     for ns in getattr(model, 'namespaces', []):
         if ns.name == 'ClientCommands' or True:  # Search all namespaces

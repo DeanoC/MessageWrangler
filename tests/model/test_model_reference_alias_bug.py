@@ -1,7 +1,7 @@
 import os
 import pytest
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model import ModelReference
 
 def test_model_reference_alias_bug():
@@ -9,12 +9,11 @@ def test_model_reference_alias_bug():
     comms_path = os.path.join(os.path.dirname(__file__), "../def", "sh4c_comms.def")
     early_comms, all_early_models = load_early_model_with_imports(comms_path)
     # Convert all EarlyModels to ModelNamespaces and merge
-    from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
     all_namespaces = []
     merged_alias_map = {}
     merged_imports = {}
     for em in all_early_models.values():
-        model = EarlyModelToModelTransform().transform(em)
+        model = EarlyModelToModel().process(em)
         all_namespaces.extend(model.namespaces)
         # Merge alias_map and imports from each model
         if hasattr(model, 'alias_map') and model.alias_map:

@@ -1,14 +1,14 @@
 import os
 from generators.python3_generator import generate_python3_code
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 import re
 from generators.python3_generator import get_file_level_namespace_name
 
 def test_python3_generator_primitives_mapping():
     def_path = os.path.join("tests", "def", "test_arrays_and_references.def")
     early_model, _ = load_early_model_with_imports(def_path)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     ns_name = get_file_level_namespace_name(model)
     code = generate_python3_code(model, module_name=ns_name)
     # Check file-level namespace class

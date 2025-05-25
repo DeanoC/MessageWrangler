@@ -1,5 +1,5 @@
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model_transforms.assign_unique_names_transform import AssignUniqueNamesTransform
 import os
 
@@ -7,7 +7,7 @@ def test_inline_enum_unique_name():
     # Use sh4c_base.def which has an inline enum in Command.type
     base_path = os.path.join(os.path.dirname(__file__), "../def", "sh4c_base.def")
     early_model, _ = load_early_model_with_imports(base_path)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     model = AssignUniqueNamesTransform().transform(model)
     # Find the Command_type enum
     def find_enum_by_unique_name(model, unique_name):

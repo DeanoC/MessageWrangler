@@ -6,11 +6,11 @@ from early_model import EarlyModel
 from model import Model, ModelNamespace, ModelMessage, ModelEnum, ModelField, ModelEnumValue, FieldType, FieldModifier
 from model import ModelReference
 
-class EarlyModelToModelTransform:
+class EarlyModelToModel:
     def __init__(self):
         # Mapping from QFN to ModelEnum for all enums (local and imported)
         self.model_enum_by_qfn = {}
-    def transform(self, early_model: EarlyModel) -> Model:
+    def process(self, early_model: EarlyModel) -> Model:
         """
         Convert a fully-resolved EarlyModel to a concrete Model.
         All references must be QFN and resolvable.
@@ -131,7 +131,7 @@ class EarlyModelToModelTransform:
                 imported_model = early_model.imports.get(key)
                 if imported_model:
                     # Use the same transform instance for imports to share model_enum_by_qfn
-                    imported_model_obj = self.transform(imported_model)
+                    imported_model_obj = self.process(imported_model)
                     imports_dict[key] = imported_model_obj
                     print(f"[ALIAS DEBUG] alias: {alias}, imported_model_obj: <Model object>, namespaces: {[ns.name for ns in getattr(imported_model_obj, 'namespaces', [])]}")
                     # Always map alias to the file-level namespace QFN (auto-generated or explicit)

@@ -1,14 +1,14 @@
 import os
 import pytest
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model import ModelReference
 
 def test_model_enum_inheritance_inline_cross_file():
     # Load sh4c_comms.def and all its imports using the correct pipeline
     comms_path = os.path.join(os.path.dirname(__file__), "../def", "sh4c_comms.def")
     early_comms, all_early_models = load_early_model_with_imports(comms_path)
-    model_comms = EarlyModelToModelTransform().transform(early_comms)
+    model_comms = EarlyModelToModel().process(early_comms)
 
     # Recursively find ClientCommands namespace
     def find_namespace(ns_list, target):

@@ -1,13 +1,13 @@
 import os
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model_transforms.assign_enum_values_transform import AssignEnumValuesTransform
 
 def test_enum_value_assignment_inheritance():
     # Use sh4c_comms.def which has enum inheritance and explicit/implicit values
     comms_path = os.path.join(os.path.dirname(__file__), "../def", "sh4c_comms.def")
     early_comms, all_early_models = load_early_model_with_imports(comms_path)
-    model_comms = EarlyModelToModelTransform().transform(early_comms)
+    model_comms = EarlyModelToModel().process(early_comms)
     model_comms = AssignEnumValuesTransform().transform(model_comms)
 
     # Find ClientCommands namespace

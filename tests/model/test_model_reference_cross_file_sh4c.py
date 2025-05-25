@@ -1,7 +1,7 @@
 import os
 import pytest
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model import ModelReference
 
 def test_model_reference_resolution_sh4c():
@@ -25,7 +25,7 @@ def test_model_reference_resolution_sh4c():
             real_qfn = f"{imported_ns_name}::Command"
             print(f"    [DEBUG] Reference using alias: {ref_qfn} should resolve to: {real_qfn}")
 
-    model_comms = EarlyModelToModelTransform().transform(early_comms)
+    model_comms = EarlyModelToModel().process(early_comms)
 
     # Recursively find ClientCommands namespace
     def find_namespace(ns_list, target):

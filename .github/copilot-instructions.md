@@ -11,7 +11,7 @@ The processing pipelines consists of the following steps:
 ** Example of correct loading and processing of main.def:
 ```python
     early_main, all_early_models = load_early_model_with_imports(main_path)
-    model_main = EarlyModelToModelTransform().transform(early_main)
+    model_main = EarlyModelToModel().process(early_main)
 
 ```
 

@@ -4,7 +4,7 @@ import glob
 import pytest
 from generators.json_schema_generator import generate_json_schema
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 
 
 try:
@@ -31,7 +31,7 @@ def test_json_schema_generation_and_validation(def_path):
     # Step 1: Load and resolve EarlyModel (with imports)
     early_model, _ = load_early_model_with_imports(def_path)
     # Step 2: Convert to generator-ready Model
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     # Step 3: Generate JSON schema
     schema = generate_json_schema(model)
     # Step 4: Validate the generated schema itself

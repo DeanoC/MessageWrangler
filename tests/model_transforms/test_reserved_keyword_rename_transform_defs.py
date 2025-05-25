@@ -2,7 +2,7 @@ import os
 import glob
 import pytest
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model_transforms.reserved_keyword_rename_transform import ReservedKeywordRenameTransform
 
 def get_valid_def_files():
@@ -21,7 +21,7 @@ def test_reserved_keyword_rename_transform_on_defs(def_path):
     reserved = {"base", "main", "class", "def", "return"}
     prefix = "gen_"
     early_model, _ = load_early_model_with_imports(def_path)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     transform = ReservedKeywordRenameTransform(reserved, prefix)
     model = transform.transform(model)
     # Check all namespaces, messages, enums, and fields for renamed reserved keywords

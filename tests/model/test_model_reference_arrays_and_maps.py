@@ -3,7 +3,7 @@ from lark_parser import parse_message_dsl
 from def_file_loader import _build_early_model_from_lark_tree
 from early_model_transforms.add_file_level_namespace_transform import AddFileLevelNamespaceTransform
 from early_model_transforms.qfn_reference_transform import QfnReferenceTransform
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model import FieldType, ModelReference
 
 def test_model_reference_arrays_and_maps():
@@ -15,7 +15,7 @@ def test_model_reference_arrays_and_maps():
     early_model = _build_early_model_from_lark_tree(tree, file_namespace, source_file=def_file)
     AddFileLevelNamespaceTransform().transform(early_model)
     QfnReferenceTransform().transform(early_model)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
 
     # Find WithMap message
     with_map = None

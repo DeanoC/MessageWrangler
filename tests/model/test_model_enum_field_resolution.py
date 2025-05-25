@@ -1,7 +1,7 @@
 import os
 import pytest
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model import FieldType
 
 def test_enum_field_resolution_sh4c_comms():
@@ -12,7 +12,7 @@ def test_enum_field_resolution_sh4c_comms():
     from model_debug import debug_print_early_model, debug_print_model
     comms_path = os.path.join(os.path.dirname(__file__), "../def", "sh4c_comms.def")
     early_comms, all_early_models = load_early_model_with_imports(comms_path)
-    model_comms = EarlyModelToModelTransform().transform(early_comms)
+    model_comms = EarlyModelToModel().process(early_comms)
 
     def find_namespace(ns_list, target):
         for ns in ns_list:
@@ -70,7 +70,7 @@ def test_enum_field_resolution_inheritance():
     from model_debug import debug_print_early_model, debug_print_model
     def_path = os.path.join(os.path.dirname(__file__), "../def", "test_enum_inheritance.def")
     early_model, all_early_models = load_early_model_with_imports(def_path)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     def find_namespace(ns_list, target):
         for ns in ns_list:
             if ns.name == target:

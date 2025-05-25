@@ -3,7 +3,7 @@ import os
 import sys
 import pytest
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from generators.python3_generator import write_python3_files_for_model_and_imports, get_file_level_namespace_name
 
 def import_generated_module(module_path, module_name):
@@ -17,7 +17,7 @@ def test_enum_inheritance_and_imports():
     # Generate code for sh4c_comms.def and sh4c_base.def
     def_path = os.path.join("tests", "def", "sh4c_comms.def")
     early_model, _ = load_early_model_with_imports(def_path)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     out_dir = os.path.join("generated", "python3")
     write_python3_files_for_model_and_imports(model, out_dir)
     # Use package-style import for generated modules

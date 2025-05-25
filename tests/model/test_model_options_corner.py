@@ -11,7 +11,7 @@ from lark_parser import parse_message_dsl
 from def_file_loader import _build_early_model_from_lark_tree
 from early_model_transforms.add_file_level_namespace_transform import AddFileLevelNamespaceTransform
 from early_model_transforms.qfn_reference_transform import QfnReferenceTransform
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 
 def test_options_def_empty():
     dsl = '''
@@ -21,7 +21,7 @@ def test_options_def_empty():
     early_model = _build_early_model_from_lark_tree(tree, "test")
     AddFileLevelNamespaceTransform().transform(early_model)
     QfnReferenceTransform().transform(early_model)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     opts = getattr(model, 'options', None)
     assert opts is not None
     empty = get_option(model, "EmptyOptions")
@@ -40,7 +40,7 @@ def test_options_def_with_comments_only():
     early_model = _build_early_model_from_lark_tree(tree, "test")
     AddFileLevelNamespaceTransform().transform(early_model)
     QfnReferenceTransform().transform(early_model)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     opts = getattr(model, 'options', None)
     assert opts is not None
     only = get_option(model, "OnlyComments")
@@ -59,7 +59,7 @@ def test_options_def_with_trailing_comma():
     early_model = _build_early_model_from_lark_tree(tree, "test")
     AddFileLevelNamespaceTransform().transform(early_model)
     QfnReferenceTransform().transform(early_model)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     opts = getattr(model, 'options', None)
     assert opts is not None
     trailing = get_option(model, "TrailingComma")
@@ -81,7 +81,7 @@ def test_options_def_with_interleaved_comments():
     early_model = _build_early_model_from_lark_tree(tree, "test")
     AddFileLevelNamespaceTransform().transform(early_model)
     QfnReferenceTransform().transform(early_model)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     opts = getattr(model, 'options', None)
     assert opts is not None
     inter = get_option(model, "Interleaved")
@@ -107,7 +107,7 @@ def test_options_def_with_namespace_and_comments():
     early_model = _build_early_model_from_lark_tree(tree, "test")
     AddFileLevelNamespaceTransform().transform(early_model)
     QfnReferenceTransform().transform(early_model)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     opts = getattr(model, 'options', None)
     assert opts is not None
     nsopts = get_option(model, "Edge::NSOptions")

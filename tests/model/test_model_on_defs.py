@@ -6,7 +6,7 @@ from lark_parser import parse_message_dsl
 from def_file_loader import _build_early_model_from_lark_tree
 from early_model_transforms.add_file_level_namespace_transform import AddFileLevelNamespaceTransform
 from early_model_transforms.qfn_reference_transform import QfnReferenceTransform
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 from model import Model
 
 def_dir = os.path.join(os.path.dirname(__file__), "../def")
@@ -76,7 +76,7 @@ def test_model_on_defs():
         early_model = _build_early_model_from_lark_tree(tree, file_namespace, source_file=def_file)
         AddFileLevelNamespaceTransform().transform(early_model)
         QfnReferenceTransform().transform(early_model)
-        model = EarlyModelToModelTransform().transform(early_model)
+        model = EarlyModelToModel().process(early_model)
         names = extract_model_names(model)
         check_model_references_resolved(model, names)
         # Print model for inspection

@@ -3,7 +3,7 @@ import glob
 import pytest
 from generators.python3_generator import generate_python3_code, write_python3_files_for_model_and_imports, get_file_level_namespace_name
 from tests.test_utils import load_early_model_with_imports
-from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+from earlymodel_to_model import EarlyModelToModel
 
 GENERATED_DIR = os.path.join("generated", "python3")
 os.makedirs(GENERATED_DIR, exist_ok=True)
@@ -26,7 +26,7 @@ import sys
 @pytest.mark.parametrize("def_path", get_def_files())
 def test_python3_generator_writes_files_for_imports(def_path):
     early_model, all_early_models = load_early_model_with_imports(def_path)
-    model = EarlyModelToModelTransform().transform(early_model)
+    model = EarlyModelToModel().process(early_model)
     # Write all files for the root model and its imports
     write_python3_files_for_model_and_imports(model, GENERATED_DIR)
     # Collect all expected .py files (for root and all imports)

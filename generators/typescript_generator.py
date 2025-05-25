@@ -10,6 +10,9 @@ from model_transforms.assign_unique_names_transform import AssignUniqueNamesTran
 from model_transforms.flatten_enums_transform import FlattenEnumsTransform
 
 def generate_typescript_code(model: Model, module_name: str = "messages", transforms: List[Callable] = None):
+    # Apply enum value prefixing transform for TypeScript to avoid enum value name collisions
+    from model_transforms.prefix_enum_value_names_transform import PrefixEnumValueNamesTransform
+    model = PrefixEnumValueNamesTransform().transform(model)
     # Track emitted inline enums to avoid duplicates
     emitted_inline_enums = set()
 
@@ -203,7 +206,7 @@ def write_typescript_file(model: Model, out_path):
 if __name__ == "__main__":
     import os
     from def_file_loader import load_early_model_with_imports
-    from early_model_transforms.earlymodel_to_model_transform import EarlyModelToModelTransform
+    from earlymodel_to_model import early_model_to_model
 
     def test_typescript_generator():
         test_dir = os.path.join(os.path.dirname(__file__), "..", "tests", "def")
@@ -212,7 +215,7 @@ if __name__ == "__main__":
                 continue
             main_path = os.path.join(test_dir, fname)
             early_main, all_early_models = load_early_model_with_imports(main_path)
-            model_main = EarlyModelToModelTransform().transform(early_main)
+            model_main = early_model_to_model(early_main)
             ts_code = generate_typescript_code(model_main)
             assert ts_code.strip(), f"No TypeScript code generated for {fname}"
             print(f"[PASS] {fname}")
